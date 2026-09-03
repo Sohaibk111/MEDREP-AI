@@ -226,6 +226,7 @@ async function runApiAndSafetyVerification() {
   } finally {
     // Teardown: Clean up and restore original store file so seed data is untouched
     fs.writeFileSync(storePath, backupStore);
+    await request('/api/v1/system/reload-store', { method: 'POST' });
     console.log('\n[Teardown] Restored clean baseline data/medrep_crm_store.json.');
   }
 

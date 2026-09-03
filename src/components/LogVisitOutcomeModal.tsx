@@ -111,7 +111,8 @@ export const LogVisitOutcomeModal: React.FC<LogVisitOutcomeModalProps> = ({
         notes: notes.trim() || undefined,
         samplesCount: selectedType === 'SAMPLE_PROVIDED' || selectedType === 'TRIAL_STARTED' ? samplesCount : undefined,
         committedUnits: selectedType === 'CONVERTED' ? committedUnits : undefined,
-        followUpDate: followUpDate || undefined
+        followUpDate: followUpDate || undefined,
+        doctorId: doctor?.id || visit.doctorId
       });
 
       if (res.success) {

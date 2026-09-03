@@ -233,6 +233,7 @@ export function App() {
                   onToggleTaskComplete={handleToggleTaskComplete}
                   onUpdateVisitStatus={handleUpdateVisitStatus}
                   onOpenDayEndSummary={() => setIsDayEndSummaryModalOpen(true)}
+                  onNavigateToPlanner={() => setActiveTab('planner')}
                 />
               )}
 
@@ -411,6 +412,7 @@ export function App() {
       <DayEndSummaryModal
         isOpen={isDayEndSummaryModalOpen}
         onClose={() => setIsDayEndSummaryModalOpen(false)}
+        targetDate={briefingData?.todayDate}
       />
 
       <LogVisitOutcomeModal

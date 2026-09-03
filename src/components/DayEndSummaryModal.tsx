@@ -27,7 +27,7 @@ interface DayEndSummaryModalProps {
 export const DayEndSummaryModal: React.FC<DayEndSummaryModalProps> = ({
   isOpen,
   onClose,
-  targetDate = '2026-09-01'
+  targetDate
 }) => {
   const [report, setReport] = useState<DayEndSummaryReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -93,7 +93,7 @@ export const DayEndSummaryModal: React.FC<DayEndSummaryModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Target Date: <span className="font-semibold text-white">{targetDate}</span> • Territory: Rawalpindi-East & Islamabad
+                Target Date: <span className="font-semibold text-white">{report?.date || targetDate || 'Today'}</span> • Territory: Rawalpindi-East & Islamabad
               </p>
             </div>
           </div>

@@ -41,6 +41,7 @@ import {
   getPrescriberJourneyActionRecommendation
 } from './src/services/routeEngine';
 import { generateDayEndSummary } from './src/services/dayEndSummaryService';
+import { getOperationalDateISO, formatOperationalDate } from './src/utils/dateUtils';
 
 dotenv.config();
 
@@ -88,17 +89,6 @@ function loadDurableStore(): CRMStore {
   };
 }
 
-function getTodayISO(): string {
-  const configured = process.env.MEDREP_TODAY?.trim();
-  if (configured && /^\d{4}-\d{2}-\d{2}$/.test(configured)) return configured;
-  return new Date().toISOString().slice(0, 10);
-}
-
-function formatTodayDate(iso: string): string {
-  const date = new Date(`${iso}T00:00:00Z`);
-  return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date);
-}
-
 const store = loadDurableStore();
 let doctors: Doctor[] = store.doctors;
 let visits: Visit[] = store.visits;
@@ -108,6 +98,18 @@ let fieldPlan: WeeklyFieldPlan = store.fieldPlan;
 let dataConflicts: DataConflict[] = store.dataConflicts;
 let outcomes: VisitOutcomeRecord[] = store.outcomes || [];
 let dayEndSummaries: DayEndSummaryReport[] = store.dayEndSummaries || [];
+
+function reloadDurableStoreFromDisk() {
+  const reloaded = loadDurableStore();
+  doctors = reloaded.doctors;
+  visits = reloaded.visits;
+  followups = reloaded.followups;
+  patientOpportunities = reloaded.patientOpportunities;
+  fieldPlan = reloaded.fieldPlan;
+  dataConflicts = reloaded.dataConflicts;
+  outcomes = reloaded.outcomes || [];
+  dayEndSummaries = reloaded.dayEndSummaries || [];
+}
 
 function saveDurableStore() {
   try {
@@ -130,8 +132,10 @@ function saveDurableStore() {
   }
 }
 
-// Ensure initial file exists
-saveDurableStore();
+// Only initialize data file if it does not already exist on disk
+if (!fs.existsSync(DATA_FILE)) {
+  saveDurableStore();
+}
 
 // Lazy GenAI Client getter
 let aiClient: GoogleGenAI | null = null;
@@ -162,9 +166,15 @@ async function startServer() {
     });
   });
 
+  // Administrative reset/reload endpoint for tests and environment sync
+  app.post('/api/v1/system/reload-store', (req: Request, res: Response) => {
+    reloadDurableStoreFromDisk();
+    res.json({ success: true, message: 'CRM store reloaded from disk' });
+  });
+
   // 1. Dashboard Briefing
   app.get('/api/v1/briefing', (req: Request, res: Response) => {
-    const today = getTodayISO();
+    const today = getOperationalDateISO();
     const todaysVisits = visits.filter(v => v.scheduledDate === today);
     const completedVisits = todaysVisits.filter(v => v.status === 'completed');
     const urgentFollowups = followups.filter(f => f.status === 'pending');
@@ -180,9 +190,9 @@ async function startServer() {
     });
 
     // Priority call of the moment (in_progress or next planned visit)
-    const priorityVisit = todaysVisits.find(v => v.status === 'in_progress') || todaysVisits.find(v => v.status === 'planned') || todaysVisits[0];
-    const priorityDoc = priorityVisit ? (doctors.find(d => d.id === priorityVisit.doctorId) || (priorityVisit as any).doctor || doctors[0]) : doctors[0];
-    const priorityCallOfTheMoment = priorityVisit ? {
+    const priorityVisit = todaysVisits.find(v => v.status === 'in_progress') || todaysVisits.find(v => v.status === 'planned') || (todaysVisits.length > 0 ? todaysVisits[0] : undefined);
+    const priorityDoc = priorityVisit ? (doctors.find(d => d.id === priorityVisit.doctorId) || (priorityVisit as any).doctor || null) : null;
+    const priorityCallOfTheMoment = (priorityVisit && priorityDoc) ? {
       ...priorityVisit,
       doctor: priorityDoc,
       scheduledTime: priorityVisit.scheduledTime || '11:00 AM',
@@ -213,7 +223,7 @@ async function startServer() {
 
     const stats = {
       completedVisits: completedVisits.length,
-      plannedVisitsToday: todaysVisits.length || 3,
+      plannedVisitsToday: todaysVisits.length,
       activePatientOpportunities: patientOpportunities.length,
       verifiedDoctorsCount: doctors.length
     };
@@ -222,7 +232,7 @@ async function startServer() {
       success: true,
       data: {
         date: today,
-        todayDate: formatTodayDate(today),
+        todayDate: formatOperationalDate(today),
         territory: 'Rawalpindi-East (PWD/Soan/Saidpur) & Islamabad',
         visitsTarget: 8,
         visitsPlanned: todaysVisits.length,
@@ -359,7 +369,7 @@ async function startServer() {
       doctorSpecialty: doc ? doc.specialty : 'Specialist',
       hospitalClinic: doc ? doc.clinic || doc.hospital : 'Clinic',
       area: doc ? doc.area : 'Rawalpindi',
-      scheduledDate: scheduledDate || getTodayISO(),
+      scheduledDate: scheduledDate || getOperationalDateISO(),
       scheduledTime: scheduledTime || '12:00 PM',
       status: 'planned',
       objectives: objectives || [
@@ -415,11 +425,42 @@ async function startServer() {
   // 3b. Visit Outcome Logging & Prescriber Progression (v1.1)
   app.post('/api/v1/visits/:id/outcome', (req: Request, res: Response) => {
     const { id } = req.params;
-    const { outcomeType, notes, samplesCount, committedUnits, followUpDate } = req.body;
+    const { outcomeType, notes, samplesCount, committedUnits, followUpDate, doctorId: reqDoctorId } = req.body;
 
-    const visit = visits.find(v => v.id === id);
+    let visit = visits.find(v => v.id === id);
     if (!visit) {
-      return res.status(404).json({ success: false, error: 'Visit not found' });
+      // If visit does not exist, check if id represents or body supplies a valid doctor
+      let targetDoctorId = reqDoctorId;
+      if (!targetDoctorId && id.startsWith('vis-auto-')) {
+        targetDoctorId = id.replace('vis-auto-', '');
+      }
+      if (!targetDoctorId && doctors.some(d => d.id === id)) {
+        targetDoctorId = id;
+      }
+
+      const doc = targetDoctorId ? doctors.find(d => d.id === targetDoctorId) : null;
+      if (!doc) {
+        return res.status(404).json({ success: false, error: 'Visit not found' });
+      }
+
+      // Materialize legitimate visit record for this doctor
+      const opDate = getOperationalDateISO();
+      visit = {
+        id: (id && id !== 'undefined' && id !== 'null') ? id : `vis-${Date.now()}`,
+        doctorId: doc.id,
+        doctorName: doc.name,
+        doctorSpecialty: doc.specialty,
+        hospitalClinic: doc.clinic || doc.hospital,
+        area: doc.area,
+        scheduledDate: opDate,
+        scheduledTime: '12:00 PM',
+        status: 'completed',
+        objectives: [
+          { id: `obj-${Date.now()}-1`, text: 'Field consultation & outcome logged', isAchieved: true }
+        ],
+        outcomes: []
+      };
+      visits.push(visit);
     }
 
     const VALID_OUTCOME_TYPES: VisitOutcomeType[] = [
@@ -474,7 +515,7 @@ async function startServer() {
 
       // Increment visit count if completed
       doc.totalVisitsCount = (doc.totalVisitsCount || 0) + 1;
-      doc.lastVisitedDate = visit.scheduledDate || '2026-09-01';
+      doc.lastVisitedDate = visit.scheduledDate || getOperationalDateISO();
 
       // Deterministic Progression Logic:
       if (outcomeType === 'SAMPLE_PROVIDED' || outcomeType === 'TRIAL_STARTED') {
@@ -659,7 +700,7 @@ async function startServer() {
 
   // 6b. Territory Day-End Operational Summary (v1.1)
   const handleDayEndSummary = (req: Request, res: Response) => {
-    const targetDate = (req.query.date as string) || '2026-09-01';
+    const targetDate = (req.query.date as string) || getOperationalDateISO();
     const report = generateDayEndSummary(
       targetDate,
       doctors,
@@ -675,7 +716,7 @@ async function startServer() {
 
   // 6c. Multi-Doctor Route Intelligence & Priority Scoring (v1.1)
   app.get('/api/v1/territory/route-plan', (req: Request, res: Response) => {
-    const targetDate = (req.query.date as string) || '2026-09-01';
+    const targetDate = (req.query.date as string) || getOperationalDateISO();
     const routePlan = generateRoutePlan(
       doctors,
       visits,

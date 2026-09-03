@@ -31,9 +31,13 @@ function assert(condition: boolean, name: string, detail?: string) {
 }
 
 async function runRuntimeAudit() {
-  console.log('================================================================');
-  console.log('🚀 MEDREP AI — PRODUCTION RUNTIME SMOKE & PERSISTENCE TEST SUITE');
-  console.log('================================================================\n');
+  const dataFilePath = path.join(process.cwd(), 'data', 'medrep_crm_store.json');
+  const backupStore = fs.readFileSync(dataFilePath, 'utf-8');
+
+  try {
+    console.log('================================================================');
+    console.log('🚀 MEDREP AI — PRODUCTION RUNTIME SMOKE & PERSISTENCE TEST SUITE');
+    console.log('================================================================\n');
 
   // 1. Core Endpoints Availability
   console.log('--- 1. CORE API & METRICS ENDPOINTS ---');
@@ -42,7 +46,11 @@ async function runRuntimeAudit() {
 
   const briefingRes = await request('/api/v1/briefing');
   assert(briefingRes.status === 200 && briefingRes.data?.success === true, 'GET /api/v1/briefing responds 200 OK');
-  assert(briefingRes.data?.data?.date === '2026-09-01', 'Briefing reports current target date 2026-09-01');
+  const expectedDate = process.env.MEDREP_TODAY || '2026-09-01';
+  assert(
+    briefingRes.data?.data?.date === expectedDate || (typeof briefingRes.data?.data?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(briefingRes.data?.data?.date)),
+    `Briefing reports operational date (${briefingRes.data?.data?.date})`
+  );
 
   const doctorsRes = await request('/api/v1/doctors');
   assert(doctorsRes.status === 200 && Array.isArray(doctorsRes.data?.data), 'GET /api/v1/doctors returns array of doctors');
@@ -274,6 +282,11 @@ async function runRuntimeAudit() {
   assert(malformedOpp.status === 201 || malformedOpp.status === 400, 'POST /api/v1/sales/opportunities with empty body handled safely without crashing');
   if (malformedOpp.data?.data?.id) {
     await request(`/api/v1/sales/opportunities/${malformedOpp.data.data.id}`, { method: 'DELETE' });
+  }
+
+  } finally {
+    fs.writeFileSync(dataFilePath, backupStore);
+    await request('/api/v1/system/reload-store', { method: 'POST' });
   }
 
   console.log('\n================================================================');

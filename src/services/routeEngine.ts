@@ -1,9 +1,3 @@
-function getTodayISO(): string {
-  const configured = typeof process !== 'undefined' ? process.env.MEDREP_TODAY?.trim() : undefined;
-  if (configured && /^\d{4}-\d{2}-\d{2}$/.test(configured)) return configured;
-  return new Date().toISOString().slice(0, 10);
-}
-
 import {
   Doctor,
   Visit,
@@ -14,6 +8,7 @@ import {
   RouteStopStatus,
   PrescriberJourneyState
 } from '../types';
+import { getOperationalDateISO } from '../utils/dateUtils';
 
 export function getPrescriberJourneyStage(
   doc: Doctor, 
@@ -58,7 +53,7 @@ export function generateRoutePlan(
   visits: Visit[],
   followups: FollowupTask[],
   opportunities: AnonymousPatientOpportunity[],
-  targetDate: string = getTodayISO()
+  targetDate: string = getOperationalDateISO()
 ): RoutePlanResponse {
   // Filter visits for targetDate or fallback to all planned/in_progress/completed visits for current day
   const dayVisits = visits.filter(v => v.scheduledDate === targetDate);

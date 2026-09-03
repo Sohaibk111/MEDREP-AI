@@ -40,7 +40,15 @@ export const FieldPlannerView: React.FC<FieldPlannerViewProps> = ({
 }) => {
   const [selectedDay, setSelectedDay] = useState<'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday'>('monday');
 
-  if (!plannerData) return null;
+  if (!plannerData) {
+    return (
+      <div className="p-12 text-center bg-white rounded-2xl border border-[#e2e8f0] shadow-xs space-y-3">
+        <Calendar className="w-8 h-8 text-[#0ea5e9] mx-auto animate-pulse" />
+        <h3 className="text-base font-bold text-[#0f172a]">Loading Route & Territory Plan...</h3>
+        <p className="text-xs text-[#64748b]">Gathering geographic clusters and physician schedules.</p>
+      </div>
+    );
+  }
 
   const getDayPlan = (dayId: string) => {
     if (!plannerData.days) return null;
@@ -122,7 +130,7 @@ export const FieldPlannerView: React.FC<FieldPlannerViewProps> = ({
       </div>
 
       {/* Selected Day Overview */}
-      {dayPlan && (
+      {dayPlan ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Left 4 Cols: Cluster info & summary */}
           <div className="lg:col-span-4 space-y-4">
@@ -172,111 +180,137 @@ export const FieldPlannerView: React.FC<FieldPlannerViewProps> = ({
               </span>
             </div>
 
-            <div className="space-y-3">
-              {(dayPlan.stops || []).map((stop, index) => {
-                const matchVisit = visits.find(v => v.doctorId === stop.doctorId);
-                const visitStatus = matchVisit?.status || 'planned';
-                const doctor = stop.doctor || doctors.find(d => d.id === stop.doctorId);
-                const stage = doctor ? getPrescriberJourneyStage(doctor) : 'PROSPECTING';
-                const nextAction = doctor ? getPrescriberJourneyActionRecommendation(stage) : null;
-                const doctorName = doctor?.name || stop.doctorName || 'Dr. Field Call';
-                const hospital = stop.hospitalName || stop.hospitalClinic || doctor?.hospital || 'Clinic';
-                const specialty = doctor?.specialty || stop.specialty || 'Diabetologist';
-                const priority = doctor?.priority || stop.priority || 'A';
+            {(!dayPlan.stops || dayPlan.stops.length === 0) ? (
+              <div className="p-8 text-center bg-white rounded-xl border border-dashed border-[#cbd5e1] space-y-2">
+                <p className="text-xs font-medium text-[#64748b]">No doctor stops scheduled for this day yet.</p>
+                <button
+                  onClick={onAddStop}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[#0ea5e9] hover:underline cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Stop to Route</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {dayPlan.stops.map((stop: any, index: number) => {
+                  const matchVisit = visits.find(v => v.doctorId === stop.doctorId);
+                  const visitStatus = matchVisit?.status || 'planned';
+                  const doctor = stop.doctor || doctors.find(d => d.id === stop.doctorId);
+                  const stage = doctor ? getPrescriberJourneyStage(doctor) : 'PROSPECTING';
+                  const nextAction = doctor ? getPrescriberJourneyActionRecommendation(stage) : null;
+                  const doctorName = doctor?.name || stop.doctorName || 'Dr. Field Call';
+                  const hospital = stop.hospitalName || stop.hospitalClinic || doctor?.hospital || 'Clinic';
+                  const specialty = doctor?.specialty || stop.specialty || 'Diabetologist';
+                  const priority = doctor?.priority || stop.priority || 'A';
 
-                return (
-                  <div
-                    key={stop.id || index}
-                    className="bg-white border border-[#e2e8f0] hover:border-sky-300 rounded-xl p-4.5 shadow-2xs transition-all flex flex-col gap-3"
-                  >
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                      <div className="flex items-start gap-3.5">
-                        <div className="w-8 h-8 rounded-xl bg-[#0f172a] text-white flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
-                          {index + 1}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 
-                              onClick={() => doctor && onOpenDoctorDetail(doctor)}
-                              className="text-sm font-bold text-[#0f172a] hover:text-[#0ea5e9] cursor-pointer"
-                            >
-                              {doctorName}
-                            </h4>
-                            <span className="text-[10px] font-black uppercase px-2 py-0.2 rounded bg-sky-50 text-[#0ea5e9] border border-sky-100">
-                              Priority {priority}
-                            </span>
-                            <span className="text-[10px] font-bold uppercase px-2 py-0.2 rounded bg-slate-100 text-[#0f172a] border border-slate-200">
-                              Journey: {stage}
-                            </span>
-                            <span className={`text-[10px] font-bold uppercase px-2 py-0.2 rounded border ${
-                              visitStatus === 'completed'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : visitStatus === 'in_progress'
-                                ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                            }`}>
-                              {visitStatus.replace('_', ' ')}
-                            </span>
+                  return (
+                    <div
+                      key={stop.id || index}
+                      className="bg-white border border-[#e2e8f0] hover:border-sky-300 rounded-xl p-4.5 shadow-2xs transition-all flex flex-col gap-3"
+                    >
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3.5">
+                          <div className="w-8 h-8 rounded-xl bg-[#0f172a] text-white flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
+                            {index + 1}
                           </div>
-                          <p className="text-xs text-[#64748b] mt-0.5">
-                            {specialty} • {hospital}
-                          </p>
-                          <p className="text-xs text-[#334155] mt-1 flex items-center gap-1.5 font-medium">
-                            <Clock className="w-3.5 h-3.5 text-[#0ea5e9]" />
-                            <span>Slot: {stop.preferredTimeSlot || stop.timingSlot || 'OPD Hours'}</span>
-                          </p>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 
+                                onClick={() => doctor && onOpenDoctorDetail(doctor)}
+                                className="text-sm font-bold text-[#0f172a] hover:text-[#0ea5e9] cursor-pointer"
+                              >
+                                {doctorName}
+                              </h4>
+                              <span className="text-[10px] font-black uppercase px-2 py-0.2 rounded bg-sky-50 text-[#0ea5e9] border border-sky-100">
+                                Priority {priority}
+                              </span>
+                              <span className="text-[10px] font-bold uppercase px-2 py-0.2 rounded bg-slate-100 text-[#0f172a] border border-slate-200">
+                                Journey: {stage}
+                              </span>
+                              <span className={`text-[10px] font-bold uppercase px-2 py-0.2 rounded border ${
+                                visitStatus === 'completed'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : visitStatus === 'in_progress'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200'
+                              }`}>
+                                {visitStatus.replace('_', ' ')}
+                              </span>
+                            </div>
+                            <p className="text-xs text-[#64748b] mt-0.5">
+                              {specialty} • {hospital}
+                            </p>
+                            <p className="text-xs text-[#334155] mt-1 flex items-center gap-1.5 font-medium">
+                              <Clock className="w-3.5 h-3.5 text-[#0ea5e9]" />
+                              <span>Slot: {stop.preferredTimeSlot || stop.timingSlot || 'OPD Hours'}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-[#f1f5f9] flex-wrap">
+                          {matchVisit && onUpdateVisitStatus && visitStatus === 'planned' && (
+                            <button
+                              onClick={() => onUpdateVisitStatus(matchVisit.id, 'in_progress')}
+                              className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-[#0ea5e9] rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                            >
+                              Start Visit
+                            </button>
+                          )}
+                          {matchVisit && onUpdateVisitStatus && visitStatus === 'in_progress' && (
+                            <button
+                              onClick={() => onUpdateVisitStatus(matchVisit.id, 'completed')}
+                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                            >
+                              Mark Done
+                            </button>
+                          )}
+                          {doctor && onLogOutcome && (
+                            <button
+                              onClick={() => onLogOutcome(doctor, matchVisit?.id || stop.visitId)}
+                              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Log Outcome</span>
+                            </button>
+                          )}
+                          {doctor && (
+                            <button
+                              onClick={() => onOpenAICoach(doctor)}
+                              className="px-3 py-1.5 bg-[#f0f9ff] hover:bg-sky-100 text-[#0ea5e9] border border-sky-200 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>Pre-Call Coach</span>
+                            </button>
+                          )}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-[#f1f5f9] flex-wrap">
-                        {matchVisit && onUpdateVisitStatus && visitStatus === 'planned' && (
-                          <button
-                            onClick={() => onUpdateVisitStatus(matchVisit.id, 'in_progress')}
-                            className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-[#0ea5e9] rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                          >
-                            Start Visit
-                          </button>
-                        )}
-                        {matchVisit && onUpdateVisitStatus && visitStatus === 'in_progress' && (
-                          <button
-                            onClick={() => onUpdateVisitStatus(matchVisit.id, 'completed')}
-                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                          >
-                            Mark Done
-                          </button>
-                        )}
-                        {doctor && onLogOutcome && (
-                          <button
-                            onClick={() => onLogOutcome(doctor, matchVisit?.id || stop.visitId)}
-                            className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>Log Outcome</span>
-                          </button>
-                        )}
-                        {doctor && (
-                          <button
-                            onClick={() => onOpenAICoach(doctor)}
-                            className="px-3 py-1.5 bg-[#f0f9ff] hover:bg-sky-100 text-[#0ea5e9] border border-sky-200 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>Pre-Call Coach</span>
-                          </button>
-                        )}
-                      </div>
+                      {nextAction && (
+                        <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-xs flex items-start gap-2">
+                          <span className="font-bold text-[#0ea5e9] shrink-0 text-[10px] uppercase mt-0.5">Next Action:</span>
+                          <span className="text-[#334155] font-medium">{nextAction}</span>
+                        </div>
+                      )}
                     </div>
-
-                    {nextAction && (
-                      <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-xs flex items-start gap-2">
-                        <span className="font-bold text-[#0ea5e9] shrink-0 text-[10px] uppercase mt-0.5">Next Action:</span>
-                        <span className="text-[#334155] font-medium">{nextAction}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
+        </div>
+      ) : (
+        <div className="p-8 text-center bg-white rounded-2xl border border-[#e2e8f0] shadow-xs space-y-3">
+          <Calendar className="w-8 h-8 text-[#94a3b8] mx-auto" />
+          <h3 className="text-sm font-bold text-[#0f172a]">No schedule configured for this day</h3>
+          <p className="text-xs text-[#64748b]">Add doctor consultation stops to populate this day's route.</p>
+          <button
+            onClick={onAddStop}
+            className="px-4 py-2 bg-[#0ea5e9] hover:bg-sky-600 text-white rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Stop to Route</span>
+          </button>
         </div>
       )}
     </div>

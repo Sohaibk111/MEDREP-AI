@@ -218,6 +218,7 @@ export async function logVisitOutcome(visitId: string, payload: {
   samplesCount?: number;
   committedUnits?: number;
   followUpDate?: string;
+  doctorId?: string;
 }): Promise<{ success: boolean; data: { visit: Visit; doctor: Doctor; outcomeRecord: VisitOutcomeRecord } }> {
   const res = await fetch(`${API_BASE}/visits/${visitId}/outcome`, {
     method: 'POST',

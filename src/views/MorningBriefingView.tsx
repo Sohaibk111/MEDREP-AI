@@ -14,7 +14,8 @@ import {
   Award,
   ChevronRight,
   Plus,
-  FileText
+  FileText,
+  Calendar
 } from 'lucide-react';
 import { Doctor, Visit, FollowupTask, AnonymousPatientOpportunity, DashboardBriefingData } from '../types';
 
@@ -28,6 +29,7 @@ interface MorningBriefingViewProps {
   onToggleTaskComplete: (taskId: string, currentStatus: boolean) => void;
   onUpdateVisitStatus: (visitId: string, status: string) => void;
   onOpenDayEndSummary?: () => void;
+  onNavigateToPlanner?: () => void;
 }
 
 export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
@@ -39,7 +41,8 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
   onAddTask,
   onToggleTaskComplete,
   onUpdateVisitStatus,
-  onOpenDayEndSummary
+  onOpenDayEndSummary,
+  onNavigateToPlanner
 }) => {
   if (!briefingData) return null;
 
@@ -174,8 +177,8 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left 7 Cols: Call of the Moment & Today's Schedule Queue */}
         <div className="lg:col-span-7 space-y-5">
-          {/* Priority Call of the Moment Highlight Card */}
-          {priorityCallOfTheMoment && targetDoc && (
+          {/* Priority Call of the Moment Highlight Card or Empty State */}
+          {priorityCallOfTheMoment && targetDoc ? (
             <div className="bg-white border-2 border-sky-200 rounded-2xl p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -249,6 +252,36 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
                 </button>
               </div>
             </div>
+          ) : (
+            <div className="bg-white border border-[#e2e8f0] rounded-2xl p-6 shadow-xs text-center space-y-3">
+              <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 flex items-center justify-center text-[#64748b]">
+                <Calendar className="w-6 h-6 text-[#0ea5e9]" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#0f172a]">No visits scheduled for today</h3>
+                <p className="text-xs text-[#64748b] max-w-md mx-auto mt-1">
+                  There are no consultation stops scheduled on your queue for {todayDate}. You can add a new stop or organize your day in the Field Planner.
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2.5 pt-1">
+                <button
+                  onClick={onScheduleVisit}
+                  className="px-4 py-2 bg-[#0ea5e9] hover:bg-sky-600 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Schedule Stop</span>
+                </button>
+                {onNavigateToPlanner && (
+                  <button
+                    onClick={onNavigateToPlanner}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-[#0f172a] rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Open Field Planner</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-[#64748b]" />
+                  </button>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Today's Field Visit Queue */}
@@ -269,74 +302,89 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-2.5">
-              {todayVisitsQueue.map((v: any) => (
-                <div
-                  key={v.id}
-                  className={`p-3.5 rounded-xl border transition-all flex items-center justify-between ${
-                    v.status === 'completed'
-                      ? 'bg-slate-50 border-slate-200 opacity-75'
-                      : v.status === 'in_progress'
-                      ? 'bg-sky-50/70 border-[#0ea5e9]'
-                      : 'bg-white border-[#e2e8f0] hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+            {todayVisitsQueue.length > 0 ? (
+              <div className="space-y-2.5">
+                {todayVisitsQueue.map((v: any) => (
+                  <div
+                    key={v.id}
+                    className={`p-3.5 rounded-xl border transition-all flex items-center justify-between ${
                       v.status === 'completed'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-slate-100 text-[#0f172a]'
-                    }`}>
-                      {v.status === 'completed' ? <CheckCircle2 className="w-4 h-4" /> : v.scheduledTime.split(' ')[0]}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 
-                          onClick={() => v.doctor && onOpenDoctorDetail(v.doctor)}
-                          className="text-xs font-bold text-[#0f172a] hover:text-[#0ea5e9] cursor-pointer"
-                        >
-                          {v.doctor?.name || 'Dr. Target'}
-                        </h4>
-                        <span className="text-[10px] font-bold text-[#64748b]">
-                          {v.doctor?.area}
-                        </span>
+                        ? 'bg-slate-50 border-slate-200 opacity-75'
+                        : v.status === 'in_progress'
+                        ? 'bg-sky-50/70 border-[#0ea5e9]'
+                        : 'bg-white border-[#e2e8f0] hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                        v.status === 'completed'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-slate-100 text-[#0f172a]'
+                      }`}>
+                        {v.status === 'completed' ? <CheckCircle2 className="w-4 h-4" /> : v.scheduledTime.split(' ')[0]}
                       </div>
-                      <p className="text-[11px] text-[#64748b] truncate max-w-xs">
-                        {v.doctor?.hospital}
-                      </p>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 
+                            onClick={() => v.doctor && onOpenDoctorDetail(v.doctor)}
+                            className="text-xs font-bold text-[#0f172a] hover:text-[#0ea5e9] cursor-pointer"
+                          >
+                            {v.doctor?.name || 'Dr. Target'}
+                          </h4>
+                          <span className="text-[10px] font-bold text-[#64748b]">
+                            {v.doctor?.area}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#64748b] truncate max-w-xs">
+                          {v.doctor?.hospital}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {v.status === 'planned' && (
+                        <button
+                          onClick={() => onUpdateVisitStatus(v.id, 'in_progress')}
+                          className="px-2.5 py-1 bg-sky-50 text-[#0ea5e9] hover:bg-sky-100 rounded text-[11px] font-bold transition-colors cursor-pointer"
+                        >
+                          Start Visit
+                        </button>
+                      )}
+                      {v.status === 'in_progress' && (
+                        <button
+                          onClick={() => onUpdateVisitStatus(v.id, 'completed')}
+                          className="px-2.5 py-1 bg-emerald-600 text-white hover:bg-emerald-700 rounded text-[11px] font-bold transition-colors cursor-pointer"
+                        >
+                          Mark Done
+                        </button>
+                      )}
+                      {v.doctor && (
+                        <button
+                          onClick={() => onOpenAICoach(v.doctor)}
+                          className="p-1.5 text-[#64748b] hover:text-[#0ea5e9] rounded hover:bg-[#f1f5f9] transition-colors cursor-pointer"
+                          title="AI Pre-Visit Coach"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    {v.status === 'planned' && (
-                      <button
-                        onClick={() => onUpdateVisitStatus(v.id, 'in_progress')}
-                        className="px-2.5 py-1 bg-sky-50 text-[#0ea5e9] hover:bg-sky-100 rounded text-[11px] font-bold transition-colors cursor-pointer"
-                      >
-                        Start Visit
-                      </button>
-                    )}
-                    {v.status === 'in_progress' && (
-                      <button
-                        onClick={() => onUpdateVisitStatus(v.id, 'completed')}
-                        className="px-2.5 py-1 bg-emerald-600 text-white hover:bg-emerald-700 rounded text-[11px] font-bold transition-colors cursor-pointer"
-                      >
-                        Mark Done
-                      </button>
-                    )}
-                    {v.doctor && (
-                      <button
-                        onClick={() => onOpenAICoach(v.doctor)}
-                        className="p-1.5 text-[#64748b] hover:text-[#0ea5e9] rounded hover:bg-[#f1f5f9] transition-colors cursor-pointer"
-                        title="AI Pre-Visit Coach"
-                      >
-                        <Sparkles className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-6 text-center border border-dashed border-[#cbd5e1] rounded-xl bg-[#f8fafc] space-y-2">
+                <p className="text-xs font-medium text-[#64748b]">
+                  No route-ordered visits found for {todayDate}.
+                </p>
+                <button
+                  onClick={onScheduleVisit}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[#0ea5e9] hover:underline cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Stop to Schedule</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
