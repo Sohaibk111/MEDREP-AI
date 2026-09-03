@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+      MEDREP_TODAY: 2026-09-01
     steps:
       - name: Stop after cleanup commit
         run: |
@@ -92,6 +93,14 @@ jobs:
         run: |
           npm install
           npx tsc --noEmit
+          nohup npm run dev > /tmp/medrep-server.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3000/api/v1/health > /dev/null
           npx tsx tests/api_verification_test.ts
           npx tsx tests/runtime-smoke-test.ts
           npx tsx tests/test_v1_1_milestone.ts
