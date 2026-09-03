@@ -6,7 +6,14 @@ import {
   WeeklyFieldPlan,
   DataConflict,
   VoiceNoteExtraction,
-  AICoachBriefing
+  AICoachBriefing,
+  VisitOutcomeType,
+  VisitOutcomeRecord,
+  DayEndSummaryReport,
+  ObjectionDrillRequest,
+  ObjectionDrillResponse,
+  ObjectionScenarioDefinition,
+  RoutePlanResponse
 } from '../types';
 
 const API_BASE = '/api/v1';
@@ -198,5 +205,68 @@ export async function sendAIChatQuery(query: string) {
     body: JSON.stringify({ query })
   });
   if (!res.ok) throw new Error('Failed to send AI chat query');
+  return res.json();
+}
+
+// ==========================================
+// MEDREP AI v1.1 API CLIENT METHODS
+// ==========================================
+
+export async function logVisitOutcome(visitId: string, payload: {
+  outcomeType: VisitOutcomeType;
+  notes?: string;
+  samplesCount?: number;
+  committedUnits?: number;
+  followUpDate?: string;
+}): Promise<{ success: boolean; data: { visit: Visit; doctor: Doctor; outcomeRecord: VisitOutcomeRecord } }> {
+  const res = await fetch(`${API_BASE}/visits/${visitId}/outcome`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to log visit outcome');
+  }
+  return res.json();
+}
+
+export async function getDayEndSummary(date?: string): Promise<{ success: boolean; data: DayEndSummaryReport }> {
+  const query = date ? `?date=${encodeURIComponent(date)}` : '';
+  const res = await fetch(`${API_BASE}/territory/day-end-summary${query}`);
+  if (!res.ok) throw new Error('Failed to generate day-end summary');
+  return res.json();
+}
+
+export async function fetchObjectionScenarios(): Promise<{ success: boolean; data: ObjectionScenarioDefinition[] }> {
+  const res = await fetch(`${API_BASE}/ai/objection-scenarios`);
+  if (!res.ok) throw new Error('Failed to fetch objection scenarios');
+  return res.json();
+}
+
+export async function runObjectionDrill(
+  scenarioIdOrRequest: string | ObjectionDrillRequest,
+  repResponseStr?: string
+): Promise<{ success: boolean; data?: ObjectionDrillResponse; error?: string }> {
+  const payload = typeof scenarioIdOrRequest === 'string'
+    ? { scenarioId: scenarioIdOrRequest, repResponse: repResponseStr || '' }
+    : scenarioIdOrRequest;
+
+  const res = await fetch(`${API_BASE}/ai/objection-drill`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to evaluate objection drill');
+  }
+  return res.json();
+}
+
+export async function getRoutePlan(date?: string): Promise<{ success: boolean; data: RoutePlanResponse }> {
+  const query = date ? `?date=${encodeURIComponent(date)}` : '';
+  const res = await fetch(`${API_BASE}/territory/route-plan${query}`);
+  if (!res.ok) throw new Error('Failed to calculate route plan');
   return res.json();
 }

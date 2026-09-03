@@ -13,12 +13,13 @@ import {
   ShieldCheck,
   Award,
   ChevronRight,
-  Plus
+  Plus,
+  FileText
 } from 'lucide-react';
-import { Doctor, Visit, FollowupTask, AnonymousPatientOpportunity } from '../types';
+import { Doctor, Visit, FollowupTask, AnonymousPatientOpportunity, DashboardBriefingData } from '../types';
 
 interface MorningBriefingViewProps {
-  briefingData: any;
+  briefingData: DashboardBriefingData;
   onOpenAICoach: (doctor: Doctor) => void;
   onOpenDoctorDetail: (doctor: Doctor) => void;
   onOpenVoiceNote: (doctor?: Doctor) => void;
@@ -26,6 +27,7 @@ interface MorningBriefingViewProps {
   onAddTask: () => void;
   onToggleTaskComplete: (taskId: string, currentStatus: boolean) => void;
   onUpdateVisitStatus: (visitId: string, status: string) => void;
+  onOpenDayEndSummary?: () => void;
 }
 
 export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
@@ -36,7 +38,8 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
   onScheduleVisit,
   onAddTask,
   onToggleTaskComplete,
-  onUpdateVisitStatus
+  onUpdateVisitStatus,
+  onOpenDayEndSummary
 }) => {
   if (!briefingData) return null;
 
@@ -44,10 +47,17 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
     todayDate,
     stats,
     priorityCallOfTheMoment,
-    todayVisitsQueue = [],
-    urgentTasks = [],
-    topTerritoryOpportunities = []
+    todayVisitsQueue,
+    urgentTasks,
+    topTerritoryOpportunities
   } = briefingData;
+
+  const {
+    completedVisits,
+    plannedVisitsToday,
+    activePatientOpportunities,
+    verifiedDoctorsCount
+  } = stats;
 
   const targetDoc = priorityCallOfTheMoment?.doctor;
   const primaryPhone = targetDoc?.contacts?.find((c: any) => c.type === 'mobile' || c.type === 'whatsapp')?.value;
@@ -74,8 +84,18 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
           </p>
         </div>
 
-        {/* Quick Launch Voice Note CTA */}
-        <div className="flex items-center gap-2.5">
+        {/* Quick Actions CTAs */}
+        <div className="flex items-center flex-wrap gap-2.5">
+          {onOpenDayEndSummary && (
+            <button
+              id="open-day-end-summary-btn"
+              onClick={onOpenDayEndSummary}
+              className="px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
+            >
+              <FileText className="w-4 h-4 text-emerald-600" />
+              <span>Day-End Summary (v1.1)</span>
+            </button>
+          )}
           <button
             onClick={() => onOpenVoiceNote(targetDoc)}
             className="px-4 py-2.5 bg-[#0f172a] hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer active:scale-95"
@@ -96,13 +116,13 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
             <Clock className="w-3.5 h-3.5 text-[#0ea5e9]" />
           </div>
           <div className="mt-2 flex items-baseline gap-1.5">
-            <span className="text-2xl font-black text-[#0f172a]">{stats.completedVisits}</span>
-            <span className="text-xs font-bold text-[#94a3b8]">/ {stats.plannedVisitsToday} Planned</span>
+            <span className="text-2xl font-black text-[#0f172a]">{completedVisits}</span>
+            <span className="text-xs font-bold text-[#94a3b8]">/ {plannedVisitsToday} Planned</span>
           </div>
           <div className="mt-2 w-full bg-[#f1f5f9] h-1.5 rounded-full overflow-hidden">
             <div 
               className="bg-[#0ea5e9] h-full rounded-full transition-all" 
-              style={{ width: `${(stats.completedVisits / (stats.plannedVisitsToday || 1)) * 100}%` }}
+              style={{ width: `${(completedVisits / (plannedVisitsToday || 1)) * 100}%` }}
             />
           </div>
         </div>
@@ -115,7 +135,7 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
             <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
           </div>
           <div className="mt-2 flex items-baseline gap-1.5">
-            <span className="text-2xl font-black text-emerald-600">{stats.activePatientOpportunities}</span>
+            <span className="text-2xl font-black text-emerald-600">{activePatientOpportunities}</span>
             <span className="text-xs font-bold text-[#64748b]">Patients</span>
           </div>
           <p className="text-[10px] text-[#64748b] mt-1">EvoCheck Trial & Sensor pipeline</p>
@@ -129,7 +149,7 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
             <Award className="w-3.5 h-3.5 text-indigo-600" />
           </div>
           <div className="mt-2 flex items-baseline gap-1.5">
-            <span className="text-2xl font-black text-[#0f172a]">{stats.verifiedDoctorsCount}</span>
+            <span className="text-2xl font-black text-[#0f172a]">{verifiedDoctorsCount}</span>
             <span className="text-xs font-bold text-[#64748b]">Target Endocrinologists</span>
           </div>
           <p className="text-[10px] text-[#64748b] mt-1">100% verified field schedules</p>
@@ -393,22 +413,22 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold font-mono text-[#0ea5e9]">
-                        #{opp.anonymousPatientCode}
+                        #{opp.anonymousPatientCode || opp.patientCode || opp.id}
                       </span>
                       <span className="text-[10px] font-bold text-[#0f172a]">
-                        {opp.doctorName}
+                        {opp.doctorName || 'Target Doctor'}
                       </span>
                     </div>
                     <p className="text-[11px] text-[#64748b] mt-0.5">
-                      {opp.clinicalProfile}
+                      {opp.clinicalProfile || 'CGM Candidate'}
                     </p>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
-                      {opp.stage.replace('_', ' ')}
+                      {String(opp.stage || opp.status || 'opportunity').replace('_', ' ')}
                     </span>
                     <p className="text-[11px] font-bold text-[#0f172a] mt-1">
-                      PKR {opp.totalValue?.toLocaleString()}
+                      PKR {(opp.totalValue || opp.estimatedValuePKR || 0)?.toLocaleString()}
                     </p>
                   </div>
                 </div>

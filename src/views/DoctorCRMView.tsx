@@ -14,6 +14,10 @@ import {
   Mic
 } from 'lucide-react';
 import { Doctor } from '../types';
+import { 
+  getPrescriberJourneyStage, 
+  getPrescriberJourneyActionRecommendation 
+} from '../services/routeEngine';
 
 interface DoctorCRMViewProps {
   doctors: Doctor[];
@@ -21,6 +25,7 @@ interface DoctorCRMViewProps {
   onOpenAICoach: (doctor: Doctor) => void;
   onOpenVoiceNote: (doctor: Doctor) => void;
   onAddDoctor: () => void;
+  onLogOutcome?: (doctor: Doctor) => void;
 }
 
 export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
@@ -28,7 +33,8 @@ export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
   onOpenDoctorDetail,
   onOpenAICoach,
   onOpenVoiceNote,
-  onAddDoctor
+  onAddDoctor,
+  onLogOutcome
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedArea, setSelectedArea] = useState('all');
@@ -179,7 +185,7 @@ export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
                   </div>
 
                   <div className="text-right">
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-100 text-[#0f172a] inline-block">
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-sky-50 text-[#0ea5e9] border border-sky-100 inline-block">
                       {doc.prescriberStatus.replace('_', ' ')}
                     </span>
                     <div className="mt-1 text-[10px] text-[#64748b]">
@@ -188,13 +194,34 @@ export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
                   </div>
                 </div>
 
+                {/* Prescriber Journey Stage & Next Action */}
+                {(() => {
+                  const stage = getPrescriberJourneyStage(doc);
+                  const nextAction = getPrescriberJourneyActionRecommendation(stage);
+                  return (
+                    <div className="mt-2.5 p-2.5 bg-[#f8fafc] border border-[#e2e8f0] rounded-xl space-y-1">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-[#64748b] uppercase">Prescriber Journey:</span>
+                        <span className="font-black text-[#0ea5e9] uppercase tracking-wider">{stage}</span>
+                      </div>
+                      <p className="text-[11px] text-[#334155] font-medium leading-relaxed">{nextAction}</p>
+                    </div>
+                  );
+                })()}
+
                 {/* Hospital / Clinic Info */}
-                <div className="mt-3 space-y-1 text-xs text-[#334155]">
+                <div className="mt-2.5 space-y-1 text-xs text-[#334155]">
                   <p className="font-semibold text-[#0f172a]">{doc.hospital}</p>
                   <p className="text-[#64748b] flex items-center gap-1.5">
                     <MapPin className="w-3.5 h-3.5 text-[#0ea5e9] shrink-0" />
                     <span>{doc.clinic} ({doc.area})</span>
                   </p>
+                  {doc.recentObjection && (
+                    <p className="text-amber-800 bg-amber-50/70 border border-amber-200/60 p-1.5 rounded-lg text-[11px] flex items-start gap-1 mt-1">
+                      <span className="font-bold shrink-0">Recent Feedback:</span>
+                      <span className="truncate">{doc.recentObjection}</span>
+                    </p>
+                  )}
                   {nextTiming && (
                     <p className="text-[#64748b] flex items-center gap-1.5 text-[11px]">
                       <Clock className="w-3.5 h-3.5 text-[#94a3b8] shrink-0" />
@@ -204,7 +231,7 @@ export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
                 </div>
 
                 {/* Potential & Daily Score Indicators */}
-                <div className="mt-3.5 pt-3 border-t border-[#f1f5f9] grid grid-cols-2 gap-2 text-center">
+                <div className="mt-3 pt-2.5 border-t border-[#f1f5f9] grid grid-cols-2 gap-2 text-center">
                   <div className="bg-[#f8fafc] p-2 rounded-lg">
                     <span className="text-[9px] font-bold text-[#64748b] uppercase">Factual Potential</span>
                     <p className="text-sm font-black text-[#0f172a]">{doc.potentialScore}/100</p>
@@ -224,6 +251,15 @@ export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
                 >
                   360° Profile
                 </button>
+                {onLogOutcome && (
+                  <button
+                    onClick={() => onLogOutcome(doc)}
+                    className="py-1.5 px-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                    title="Log Visit Outcome"
+                  >
+                    Outcome
+                  </button>
+                )}
                 <button
                   onClick={() => onOpenAICoach(doc)}
                   className="p-2 bg-[#f0f9ff] hover:bg-sky-100 text-[#0ea5e9] border border-sky-200 rounded-lg transition-colors cursor-pointer"

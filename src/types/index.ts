@@ -596,3 +596,212 @@ export interface CompetitorComparison {
   keyWeaknesses: string[];
   approvedCounterArguments: string[];
 }
+
+// ==========================================
+// MEDREP AI v1.1 EXPANDED OPERATIONAL TYPES
+// ==========================================
+
+export type VisitOutcomeType =
+  | 'LOGGED'
+  | 'SAMPLE_PROVIDED'
+  | 'TRIAL_STARTED'
+  | 'FOLLOW_UP_SCHEDULED'
+  | 'CME_INVITED'
+  | 'NO_INTEREST'
+  | 'COMPETITOR_PREFERENCE'
+  | 'PRICE_OBJECTION'
+  | 'CLINICAL_OBJECTION'
+  | 'CONVERTED'
+  | 'OTHER';
+
+export type PrescriberJourneyState =
+  | 'PROSPECTING'
+  | 'TRIALING'
+  | 'ADOPTING'
+  | 'HIGH_PRESCRIBER';
+
+export interface VisitOutcomeRecord {
+  id: string;
+  visitId: string;
+  doctorId: string;
+  outcomeType: VisitOutcomeType;
+  timestamp: string;
+  notes?: string;
+  samplesCount?: number;
+  committedUnits?: number;
+  nextActionRecommendation: string;
+  previousJourneyState?: PrescriberJourneyState;
+  updatedJourneyState: PrescriberJourneyState;
+  followUpDate?: string;
+}
+
+export interface DayEndSummaryMetrics {
+  targetDate: string;
+  totalPlannedVisits: number;
+  completedVisits: number;
+  pendingVisits: number;
+  samplesProvided: number;
+  trialsStarted: number;
+  followUpsScheduled: number;
+  cmeInvitations: number;
+  convertedVisits: number;
+  newOpportunitiesCount: number;
+  totalCommittedUnits: number;
+  totalPipelineValuePKR: number;
+}
+
+export interface DayEndSummaryReport {
+  summaryId: string;
+  date: string;
+  generatedAt: string;
+  territoryName: string;
+  representativeName: string;
+  metrics: DayEndSummaryMetrics;
+  outcomesBreakdown: Record<VisitOutcomeType, number>;
+  completedVisitDetails: {
+    visitId: string;
+    doctorId: string;
+    doctorName: string;
+    hospitalClinic: string;
+    area: string;
+    outcomeType?: VisitOutcomeType;
+    interestLevel?: string;
+    notes?: string;
+    nextFollowUpDate?: string;
+  }[];
+  notableObjections: {
+    doctorId: string;
+    doctorName: string;
+    category: string;
+    detail: string;
+    responseGiven?: string;
+  }[];
+  outstandingFollowups: {
+    taskId: string;
+    doctorId: string;
+    doctorName: string;
+    title: string;
+    dueDate: string;
+    priority: string;
+  }[];
+  executiveSummaryText: string;
+  exportableTextFormat: string;
+}
+
+export type ObjectionScenarioId =
+  | 'SCENARIO_AFFORDABILITY'
+  | 'SCENARIO_COMPETITOR_LIBRE'
+  | 'SCENARIO_MARD_ACCURACY'
+  | 'SCENARIO_WEAR_DURATION'
+  | 'SCENARIO_WATER_RESISTANCE'
+  | 'SCENARIO_HOSPITAL_PRICE'
+  | 'SCENARIO_DISCOUNT_REQUEST'
+  | 'SCENARIO_HYPOGLYCEMIA_PREVENTION'
+  | 'SCENARIO_FINGERSTICK_REPLACEMENT'
+  | 'SCENARIO_CLINICAL_EVIDENCE';
+
+export interface ObjectionScenarioDefinition {
+  id: ObjectionScenarioId;
+  title: string;
+  category: 'Commercial & Price' | 'Clinical & Evidence' | 'Technical Specs' | 'Competitor Contrast';
+  difficulty: 'Standard' | 'Challenging' | 'Advanced';
+  doctorPersona: string;
+  doctorStatement: string;
+  keyEvaluationPoints: string[];
+  authorizedResponseFact: string;
+  safetyTrapWarning?: string;
+}
+
+export interface ObjectionDrillRequest {
+  scenarioId: ObjectionScenarioId;
+  repResponse: string;
+  doctorId?: string;
+}
+
+export interface ObjectionDrillDimensionScore {
+  name: 'Accuracy' | 'Grounding' | 'Compliance' | 'Persuasiveness' | 'Clarity' | 'Objection Handling';
+  score: number; // 0 - 100
+  feedback: string;
+}
+
+export interface ObjectionDrillResponse {
+  drillId: string;
+  scenarioId: ObjectionScenarioId;
+  scenarioTitle: string;
+  doctorStatement: string;
+  repResponse: string;
+  overallScore: number; // 0 - 100
+  isCompliant: boolean;
+  accuracyScore: number;
+  persuasivenessScore: number;
+  dimensions: ObjectionDrillDimensionScore[];
+  whatDoneWell: string[];
+  whatCouldImprove: string[];
+  groundedRecommendedResponse: string;
+  safetyFlags: string[];
+  verifiedFactsCited: string[];
+  evaluatedAt: string;
+}
+
+export type RouteStopStatus = 'UPCOMING' | 'IN_PROGRESS' | 'COMPLETED' | 'OVERDUE';
+
+export interface RouteStopIntelligence {
+  stopOrder: number;
+  visitId: string;
+  doctorId: string;
+  doctorName: string;
+  specialty: string;
+  hospitalClinic: string;
+  area: string;
+  consultationWindow: string; // e.g. "10:00 AM - 01:00 PM"
+  plannedTime: string;        // e.g. "11:00 AM"
+  priorityTier: PriorityTier;
+  prescriberJourney: PrescriberJourneyState;
+  status: RouteStopStatus;
+  priorityScore: number;      // 0 - 100 deterministic
+  priorityReason: string;     // Transparent rationale
+  openOpportunitiesCount: number;
+  hasOverdueFollowup: boolean;
+  recommendedFocus: string;
+}
+
+export interface RoutePlanResponse {
+  date: string;
+  targetTerritory: string;
+  totalStops: number;
+  completedStops: number;
+  pendingStops: number;
+  stops: RouteStopIntelligence[];
+  routeSummaryReasoning: string;
+}
+
+export interface DashboardBriefingStats {
+  completedVisits: number;
+  plannedVisitsToday: number;
+  activePatientOpportunities: number;
+  verifiedDoctorsCount: number;
+}
+
+export interface DashboardBriefingData {
+  date: string;
+  todayDate: string;
+  territory: string;
+  visitsTarget: number;
+  visitsPlanned: number;
+  visitsCompleted: number;
+  openOpportunitiesCount: number;
+  priorityRouteLevel: string;
+  nextVisit?: Visit;
+  urgentFollowups: FollowupTask[];
+  activeConflictsCount: number;
+  knowledgeHub: {
+    productName: string;
+    claimsCount: number;
+    competitorsTracked: number;
+  };
+  stats: DashboardBriefingStats;
+  priorityCallOfTheMoment: any;
+  todayVisitsQueue: Visit[];
+  urgentTasks: FollowupTask[];
+  topTerritoryOpportunities: AnonymousPatientOpportunity[];
+}

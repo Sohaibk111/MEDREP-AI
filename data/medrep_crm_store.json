@@ -75,10 +75,10 @@
           "source": "field_verified"
         }
       ],
-      "lastVisitedDate": "2026-08-25",
+      "lastVisitedDate": "2026-09-01",
       "nextScheduledVisit": "2026-09-01",
-      "totalVisitsCount": 6,
-      "openPatientOpportunitiesCount": 30,
+      "totalVisitsCount": 8,
+      "openPatientOpportunitiesCount": 46,
       "recentObjections": [
         "Sensor cost for self-paying patients",
         "Patient sensor re-application concern"
@@ -482,7 +482,7 @@
       "area": "Shifa International",
       "scheduledDate": "2026-09-01",
       "scheduledTime": "11:00 AM",
-      "status": "in_progress",
+      "status": "completed",
       "objectives": [
         {
           "id": "obj-1",
@@ -510,9 +510,13 @@
         }
       ],
       "interestLevel": "very_high",
-      "summary": "Dr. Jamal reviewed the MARD report and agreed to recommend EvoCheck to two poorly controlled Type 1 adolescent patients.",
-      "nextFollowUpDate": "2026-09-03",
-      "nextVisitObjective": "Deliver dummy sensor applicator demo kit to OPD coordinator"
+      "summary": "Dr. Jamal reviewed the MARD report and agreed to recommend EvoCheck to two poorly controlled Type 1 adolescent patients.. HCP agreed to start 2 brittle diabetic patients on EvoCheck.. HCP agreed to start 2 brittle diabetic patients on EvoCheck.",
+      "nextFollowUpDate": "2026-09-08",
+      "nextVisitObjective": "Deliver dummy sensor applicator demo kit to OPD coordinator",
+      "checkOutTime": "1:26:39 PM",
+      "outcomes": [
+        "TRIAL_STARTED"
+      ]
     },
     {
       "id": "vis-102",
@@ -563,6 +567,30 @@
     }
   ],
   "followups": [
+    {
+      "id": "tsk-1788442522399",
+      "doctorId": "doc-1",
+      "doctorName": "Prof. Dr. Jamal Ahmed",
+      "doctorArea": "Shifa International",
+      "visitId": "vis-101",
+      "title": "HCP agreed to start 2 brittle diabetic patients on EvoCheck.",
+      "dueDate": "2026-09-08",
+      "priority": "high",
+      "status": "pending",
+      "source": "visit"
+    },
+    {
+      "id": "tsk-1788441999813",
+      "doctorId": "doc-1",
+      "doctorName": "Prof. Dr. Jamal Ahmed",
+      "doctorArea": "Shifa International",
+      "visitId": "vis-101",
+      "title": "HCP agreed to start 2 brittle diabetic patients on EvoCheck.",
+      "dueDate": "2026-09-08",
+      "priority": "high",
+      "status": "pending",
+      "source": "visit"
+    },
     {
       "id": "tsk-1",
       "doctorId": "doc-1",
@@ -1233,5 +1261,36 @@
       "detectedAt": "2026-08-31T14:20:00Z",
       "status": "unresolved"
     }
-  ]
+  ],
+  "outcomes": [
+    {
+      "id": "out-1788442522399",
+      "visitId": "vis-101",
+      "doctorId": "doc-1",
+      "outcomeType": "TRIAL_STARTED",
+      "timestamp": "2026-09-03T13:35:22.399Z",
+      "notes": "HCP agreed to start 2 brittle diabetic patients on EvoCheck.",
+      "samplesCount": 1,
+      "committedUnits": 2,
+      "nextActionRecommendation": "Expand appropriate patient identification and encourage repeat prescribing.",
+      "previousJourneyState": "ADOPTING",
+      "updatedJourneyState": "ADOPTING",
+      "followUpDate": "2026-09-08"
+    },
+    {
+      "id": "out-1788441999813",
+      "visitId": "vis-101",
+      "doctorId": "doc-1",
+      "outcomeType": "TRIAL_STARTED",
+      "timestamp": "2026-09-03T13:26:39.813Z",
+      "notes": "HCP agreed to start 2 brittle diabetic patients on EvoCheck.",
+      "samplesCount": 1,
+      "committedUnits": 2,
+      "nextActionRecommendation": "Expand appropriate patient identification and encourage repeat prescribing.",
+      "previousJourneyState": "ADOPTING",
+      "updatedJourneyState": "ADOPTING",
+      "followUpDate": "2026-09-08"
+    }
+  ],
+  "dayEndSummaries": []
 }

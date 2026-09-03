@@ -20,6 +20,8 @@ import { AddDoctorModal } from './components/AddDoctorModal';
 import { AddVisitModal } from './components/AddVisitModal';
 import { AddTaskModal } from './components/AddTaskModal';
 import { AddPatientOppModal } from './components/AddPatientOppModal';
+import { DayEndSummaryModal } from './components/DayEndSummaryModal';
+import { LogVisitOutcomeModal } from './components/LogVisitOutcomeModal';
 
 // Types & Services
 import { 
@@ -73,6 +75,10 @@ export function App() {
   const [isAddVisitModalOpen, setIsAddVisitModalOpen] = useState(false);
   const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
   const [isAddPatientOppModalOpen, setIsAddPatientOppModalOpen] = useState(false);
+  const [isDayEndSummaryModalOpen, setIsDayEndSummaryModalOpen] = useState(false);
+  const [isLogOutcomeModalOpen, setIsLogOutcomeModalOpen] = useState(false);
+  const [outcomeTargetDoctor, setOutcomeTargetDoctor] = useState<Doctor | null>(null);
+  const [outcomeTargetVisit, setOutcomeTargetVisit] = useState<Visit | null>(null);
 
   useEffect(() => {
     loadAllData();
@@ -154,6 +160,26 @@ export function App() {
     }
   };
 
+  const handleOpenLogOutcome = (doctor: Doctor, visitId?: string) => {
+    if (!doctor) return;
+    setOutcomeTargetDoctor(doctor);
+    const v = (briefingData?.todayVisitsQueue || []).find((vis: any) => vis.id === visitId || vis.doctorId === doctor.id);
+    setOutcomeTargetVisit(v || ({
+      id: visitId || `vis-auto-${doctor.id}`,
+      doctorId: doctor.id,
+      doctorName: doctor.name,
+      doctorSpecialty: doctor.specialty,
+      hospitalClinic: doctor.clinic || doctor.hospital,
+      area: doctor.area,
+      scheduledDate: new Date().toISOString().split('T')[0],
+      scheduledTime: '12:00 PM',
+      status: 'completed',
+      type: 'routine',
+      doctor: doctor
+    } as unknown as Visit));
+    setIsLogOutcomeModalOpen(true);
+  };
+
   const handleUpdateOppStage = async (oppId: string, newStage: any) => {
     try {
       await updatePatientOpportunity(oppId, { stage: newStage });
@@ -206,6 +232,7 @@ export function App() {
                   onAddTask={() => setIsAddTaskModalOpen(true)}
                   onToggleTaskComplete={handleToggleTaskComplete}
                   onUpdateVisitStatus={handleUpdateVisitStatus}
+                  onOpenDayEndSummary={() => setIsDayEndSummaryModalOpen(true)}
                 />
               )}
 
@@ -216,15 +243,20 @@ export function App() {
                   onOpenAICoach={handleOpenAICoach}
                   onOpenVoiceNote={handleOpenVoiceNote}
                   onAddDoctor={() => setIsAddDoctorModalOpen(true)}
+                  onLogOutcome={handleOpenLogOutcome}
                 />
               )}
 
               {activeTab === 'planner' && (
                 <FieldPlannerView
                   plannerData={plannerData}
+                  visits={briefingData?.todayVisitsQueue || []}
+                  doctors={doctors}
                   onOpenAICoach={handleOpenAICoach}
                   onOpenDoctorDetail={handleOpenDoctorDetail}
                   onAddStop={() => setIsAddVisitModalOpen(true)}
+                  onLogOutcome={handleOpenLogOutcome}
+                  onUpdateVisitStatus={handleUpdateVisitStatus}
                 />
               )}
 
@@ -374,6 +406,19 @@ export function App() {
         onClose={() => setIsAddPatientOppModalOpen(false)}
         doctors={doctors}
         onOppCreated={loadAllData}
+      />
+
+      <DayEndSummaryModal
+        isOpen={isDayEndSummaryModalOpen}
+        onClose={() => setIsDayEndSummaryModalOpen(false)}
+      />
+
+      <LogVisitOutcomeModal
+        isOpen={isLogOutcomeModalOpen}
+        onClose={() => setIsLogOutcomeModalOpen(false)}
+        visit={outcomeTargetVisit}
+        doctor={outcomeTargetDoctor}
+        onOutcomeLogged={loadAllData}
       />
     </div>
   );

@@ -27,8 +27,20 @@ import {
   WeeklyFieldPlan,
   DataConflict,
   VoiceNoteExtraction,
-  AICoachBriefing
+  AICoachBriefing,
+  VisitOutcomeType,
+  VisitOutcomeRecord,
+  DayEndSummaryReport,
+  PrescriberJourneyState
 } from './src/types';
+import { OBJECTION_SCENARIOS, getScenarioById } from './src/data/objectionScenarios';
+import { evaluateObjectionDrill } from './src/services/objectionEvaluator';
+import {
+  generateRoutePlan,
+  getPrescriberJourneyStage,
+  getPrescriberJourneyActionRecommendation
+} from './src/services/routeEngine';
+import { generateDayEndSummary } from './src/services/dayEndSummaryService';
 
 dotenv.config();
 
@@ -43,6 +55,8 @@ interface CRMStore {
   patientOpportunities: AnonymousPatientOpportunity[];
   fieldPlan: WeeklyFieldPlan;
   dataConflicts: DataConflict[];
+  outcomes?: VisitOutcomeRecord[];
+  dayEndSummaries?: DayEndSummaryReport[];
 }
 
 function loadDurableStore(): CRMStore {
@@ -54,6 +68,8 @@ function loadDurableStore(): CRMStore {
       const raw = fs.readFileSync(DATA_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.doctors) && Array.isArray(parsed.visits)) {
+        if (!Array.isArray(parsed.outcomes)) parsed.outcomes = [];
+        if (!Array.isArray(parsed.dayEndSummaries)) parsed.dayEndSummaries = [];
         return parsed;
       }
     }
@@ -66,7 +82,9 @@ function loadDurableStore(): CRMStore {
     followups: JSON.parse(JSON.stringify(INITIAL_FOLLOWUPS)),
     patientOpportunities: JSON.parse(JSON.stringify(INITIAL_PATIENT_OPPORTUNITIES)),
     fieldPlan: JSON.parse(JSON.stringify(INITIAL_FIELD_PLAN)),
-    dataConflicts: JSON.parse(JSON.stringify(INITIAL_DATA_CONFLICTS))
+    dataConflicts: JSON.parse(JSON.stringify(INITIAL_DATA_CONFLICTS)),
+    outcomes: [],
+    dayEndSummaries: []
   };
 }
 
@@ -77,6 +95,8 @@ let followups: FollowupTask[] = store.followups;
 let patientOpportunities: AnonymousPatientOpportunity[] = store.patientOpportunities;
 let fieldPlan: WeeklyFieldPlan = store.fieldPlan;
 let dataConflicts: DataConflict[] = store.dataConflicts;
+let outcomes: VisitOutcomeRecord[] = store.outcomes || [];
+let dayEndSummaries: DayEndSummaryReport[] = store.dayEndSummaries || [];
 
 function saveDurableStore() {
   try {
@@ -89,7 +109,9 @@ function saveDurableStore() {
       followups,
       patientOpportunities,
       fieldPlan,
-      dataConflicts
+      dataConflicts,
+      outcomes,
+      dayEndSummaries
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2), 'utf-8');
   } catch (err) {
@@ -137,10 +159,59 @@ async function startServer() {
     const urgentFollowups = followups.filter(f => f.status === 'pending');
     const nextVisit = todaysVisits.find(v => v.status === 'in_progress') || todaysVisits.find(v => v.status === 'planned') || todaysVisits[0];
 
+    // Build enriched visits queue with full doctor object
+    const todayVisitsQueue = todaysVisits.map(v => {
+      const doc = doctors.find(d => d.id === v.doctorId);
+      return {
+        ...v,
+        doctor: doc || (v as any).doctor
+      };
+    });
+
+    // Priority call of the moment (in_progress or next planned visit)
+    const priorityVisit = todaysVisits.find(v => v.status === 'in_progress') || todaysVisits.find(v => v.status === 'planned') || todaysVisits[0];
+    const priorityDoc = priorityVisit ? (doctors.find(d => d.id === priorityVisit.doctorId) || (priorityVisit as any).doctor || doctors[0]) : doctors[0];
+    const priorityCallOfTheMoment = priorityVisit ? {
+      ...priorityVisit,
+      doctor: priorityDoc,
+      scheduledTime: priorityVisit.scheduledTime || '11:00 AM',
+      primaryObjective: (priorityVisit.objectives && priorityVisit.objectives[0]?.text) || priorityVisit.nextVisitObjective || 'Present EvoCheck verified 8.66% MARD specification and secure 2 patient trial installations.'
+    } : null;
+
+    // Enriched urgent tasks
+    const urgentTasks = urgentFollowups.slice(0, 6).map(f => {
+      const doc = doctors.find(d => d.id === f.doctorId);
+      return {
+        ...f,
+        doctorName: doc ? doc.name : f.doctorName || 'Target Doctor',
+        isCompleted: f.status === 'completed'
+      };
+    });
+
+    // Top territory patient opportunities (with doctorName and normalized properties)
+    const topTerritoryOpportunities = patientOpportunities.slice(0, 5).map(opp => {
+      const doc = doctors.find(d => d.id === opp.doctorId);
+      return {
+        ...opp,
+        anonymousPatientCode: (opp as any).anonymousPatientCode || (opp as any).patientCode || `P-${opp.id}`,
+        stage: (opp as any).stage || (opp as any).status || 'opportunity',
+        totalValue: (opp as any).totalValue || (opp as any).estimatedValuePKR || 12900,
+        doctorName: doc ? doc.name : opp.doctorName || 'Target Doctor'
+      };
+    });
+
+    const stats = {
+      completedVisits: completedVisits.length,
+      plannedVisitsToday: todaysVisits.length || 3,
+      activePatientOpportunities: patientOpportunities.length,
+      verifiedDoctorsCount: doctors.length
+    };
+
     res.json({
       success: true,
       data: {
         date: today,
+        todayDate: 'Tuesday, Sept 1, 2026',
         territory: 'Rawalpindi-East (PWD/Soan/Saidpur) & Islamabad',
         visitsTarget: 8,
         visitsPlanned: todaysVisits.length,
@@ -154,7 +225,12 @@ async function startServer() {
           productName: 'EvoCheck Premium Linx CGM',
           claimsCount: APPROVED_PRODUCT_CLAIMS.length,
           competitorsTracked: COMPETITOR_COMPARISONS.length
-        }
+        },
+        stats,
+        priorityCallOfTheMoment,
+        todayVisitsQueue,
+        urgentTasks,
+        topTerritoryOpportunities
       }
     });
   });
@@ -325,6 +401,144 @@ async function startServer() {
     res.json({ success: true, data: visit });
   });
 
+  // 3b. Visit Outcome Logging & Prescriber Progression (v1.1)
+  app.post('/api/v1/visits/:id/outcome', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { outcomeType, notes, samplesCount, committedUnits, followUpDate } = req.body;
+
+    const visit = visits.find(v => v.id === id);
+    if (!visit) {
+      return res.status(404).json({ success: false, error: 'Visit not found' });
+    }
+
+    const VALID_OUTCOME_TYPES: VisitOutcomeType[] = [
+      'LOGGED',
+      'SAMPLE_PROVIDED',
+      'TRIAL_STARTED',
+      'FOLLOW_UP_SCHEDULED',
+      'CME_INVITED',
+      'NO_INTEREST',
+      'COMPETITOR_PREFERENCE',
+      'PRICE_OBJECTION',
+      'CLINICAL_OBJECTION',
+      'CONVERTED',
+      'OTHER'
+    ];
+
+    if (!outcomeType || !VALID_OUTCOME_TYPES.includes(outcomeType)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid outcomeType. Must be one of: ${VALID_OUTCOME_TYPES.join(', ')}`
+      });
+    }
+
+    // Update Visit state
+    visit.status = 'completed';
+    if (!visit.checkOutTime) {
+      visit.checkOutTime = new Date().toLocaleTimeString();
+    }
+    if (!visit.outcomes) {
+      visit.outcomes = [];
+    }
+    if (!visit.outcomes.includes(outcomeType)) {
+      visit.outcomes.push(outcomeType);
+    }
+    if (notes) {
+      visit.summary = visit.summary ? `${visit.summary}. ${notes}` : notes;
+    }
+    if (followUpDate) {
+      visit.nextFollowUpDate = followUpDate;
+    }
+
+    // Fetch Doctor and compute Prescriber Journey Progression
+    const doc = doctors.find(d => d.id === visit.doctorId);
+    let previousJourneyState: PrescriberJourneyState = 'PROSPECTING';
+    let updatedJourneyState: PrescriberJourneyState = 'PROSPECTING';
+    let nextActionRecommendation = 'Schedule product introduction and identify primary objection.';
+
+    if (doc) {
+      const docVisits = visits.filter(v => v.doctorId === doc.id);
+      const docOpps = patientOpportunities.filter(o => o.doctorId === doc.id);
+      previousJourneyState = getPrescriberJourneyStage(doc, docVisits, docOpps);
+
+      // Increment visit count if completed
+      doc.totalVisitsCount = (doc.totalVisitsCount || 0) + 1;
+      doc.lastVisitedDate = visit.scheduledDate || '2026-09-01';
+
+      // Deterministic Progression Logic:
+      if (outcomeType === 'SAMPLE_PROVIDED' || outcomeType === 'TRIAL_STARTED') {
+        if (previousJourneyState === 'PROSPECTING') {
+          doc.prescriberStatus = 'trialing';
+        }
+      } else if (outcomeType === 'CONVERTED' || (committedUnits && committedUnits > 0)) {
+        doc.prescriberStatus = 'active_prescriber';
+      }
+
+      // If doctor has >= 3 completed visits and >= 5 committed units
+      const completedCount = docVisits.filter(v => v.status === 'completed').length;
+      const totalUnits = docOpps.reduce((acc, curr) => acc + (curr.units || 1), 0) + (committedUnits || 0);
+
+      if (completedCount >= 3 && totalUnits >= 5) {
+        doc.prescriberStatus = 'advocate';
+      }
+
+      if (outcomeType === 'PRICE_OBJECTION' || outcomeType === 'CLINICAL_OBJECTION' || outcomeType === 'COMPETITOR_PREFERENCE') {
+        if (!doc.recentObjections) doc.recentObjections = [];
+        const objectionSummary = `${outcomeType}: ${notes || 'HCP raised clinical/pricing concern'}`;
+        if (!doc.recentObjections.includes(objectionSummary)) {
+          doc.recentObjections.unshift(objectionSummary);
+        }
+      }
+
+      updatedJourneyState = getPrescriberJourneyStage(doc, docVisits, docOpps);
+      nextActionRecommendation = getPrescriberJourneyActionRecommendation(updatedJourneyState);
+    }
+
+    // If follow-up date provided, schedule a follow-up task
+    if (followUpDate) {
+      followups.unshift({
+        id: `tsk-${Date.now()}`,
+        doctorId: visit.doctorId,
+        doctorName: visit.doctorName,
+        doctorArea: visit.area,
+        visitId: visit.id,
+        title: notes || `Follow-up on ${outcomeType}`,
+        dueDate: followUpDate,
+        priority: 'high',
+        status: 'pending',
+        source: 'visit'
+      });
+    }
+
+    // Create and save Outcome Record
+    const outcomeRecord: VisitOutcomeRecord = {
+      id: `out-${Date.now()}`,
+      visitId: visit.id,
+      doctorId: visit.doctorId,
+      outcomeType,
+      timestamp: new Date().toISOString(),
+      notes,
+      samplesCount: samplesCount || (outcomeType === 'SAMPLE_PROVIDED' ? 1 : 0),
+      committedUnits: committedUnits || (outcomeType === 'CONVERTED' ? 1 : 0),
+      nextActionRecommendation,
+      previousJourneyState,
+      updatedJourneyState,
+      followUpDate
+    };
+
+    outcomes.unshift(outcomeRecord);
+    saveDurableStore();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        visit,
+        doctor: doc,
+        outcomeRecord
+      }
+    });
+  });
+
   // 4. Follow-up Tasks
   app.get('/api/v1/followups', (req: Request, res: Response) => {
     res.json({ success: true, data: followups });
@@ -410,6 +624,14 @@ async function startServer() {
     res.json({ success: true, data: patientOpportunities[idx] });
   });
 
+  app.delete('/api/v1/sales/opportunities/:id', (req: Request, res: Response) => {
+    const idx = patientOpportunities.findIndex(o => o.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'Opportunity not found' });
+    const deleted = patientOpportunities.splice(idx, 1)[0];
+    saveDurableStore();
+    res.json({ success: true, data: deleted });
+  });
+
   // 6. Weekly Field Planner
   app.get('/api/v1/planner', (req: Request, res: Response) => {
     res.json({ success: true, data: fieldPlan });
@@ -422,6 +644,35 @@ async function startServer() {
       message: 'Field schedule clustered by geographical proximity (PWD -> Soan -> Saidpur -> PIMS).',
       data: fieldPlan
     });
+  });
+
+  // 6b. Territory Day-End Operational Summary (v1.1)
+  const handleDayEndSummary = (req: Request, res: Response) => {
+    const targetDate = (req.query.date as string) || '2026-09-01';
+    const report = generateDayEndSummary(
+      targetDate,
+      doctors,
+      visits,
+      followups,
+      patientOpportunities,
+      outcomes
+    );
+    res.json({ success: true, data: report });
+  };
+  app.get('/api/v1/territory/day-end-summary', handleDayEndSummary);
+  app.get('/api/v1/summaries/day-end', handleDayEndSummary);
+
+  // 6c. Multi-Doctor Route Intelligence & Priority Scoring (v1.1)
+  app.get('/api/v1/territory/route-plan', (req: Request, res: Response) => {
+    const targetDate = (req.query.date as string) || '2026-09-01';
+    const routePlan = generateRoutePlan(
+      doctors,
+      visits,
+      followups,
+      patientOpportunities,
+      targetDate
+    );
+    res.json({ success: true, data: routePlan });
   });
 
   // 7. Product Knowledge & Claims Hub (Source of Truth v1.2)
@@ -976,6 +1227,37 @@ User Question: "${query}"
 
     res.json({ success: true, text });
   });
+
+  // 12b. AI Objection Scenarios & Drill Evaluator (v1.1)
+  const handleObjectionScenarios = (req: Request, res: Response) => {
+    res.json({ success: true, data: OBJECTION_SCENARIOS });
+  };
+  app.get('/api/v1/ai/objection-scenarios', handleObjectionScenarios);
+  app.get('/api/v1/ai/objections/scenarios', handleObjectionScenarios);
+
+  const handleObjectionEvaluation = async (req: Request, res: Response) => {
+    const { scenarioId, repResponse } = req.body;
+    if (!scenarioId) {
+      return res.status(400).json({ success: false, error: 'Missing scenarioId' });
+    }
+    if (!getScenarioById(scenarioId)) {
+      return res.status(404).json({ success: false, error: `Invalid or unknown scenarioId: ${scenarioId}` });
+    }
+    if (!repResponse || typeof repResponse !== 'string' || repResponse.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'repResponse cannot be empty' });
+    }
+
+    try {
+      const ai = getAIClient();
+      const evaluation = await evaluateObjectionDrill(ai, scenarioId, repResponse);
+      res.json({ success: true, data: evaluation });
+    } catch (err: any) {
+      console.error('Objection drill evaluation error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Evaluation failed' });
+    }
+  };
+  app.post('/api/v1/ai/objection-drill', handleObjectionEvaluation);
+  app.post('/api/v1/ai/objections/evaluate', handleObjectionEvaluation);
 
   // Vite middleware for development vs static build in production
   if (process.env.NODE_ENV !== 'production') {

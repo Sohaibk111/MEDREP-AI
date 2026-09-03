@@ -106,6 +106,7 @@ async function runRuntimeAudit() {
   console.log('\n--- 3. PRICING & PIPELINE VALUE CALCULATIONS ---');
   const testUnits = [1, 2, 5, 10];
   const unitPrice = 12900;
+  const createdOppIds: string[] = [];
   for (const units of testUnits) {
     const expectedValue = units * unitPrice;
     const oppCreateRes = await request('/api/v1/sales/opportunities', {
@@ -117,10 +118,18 @@ async function runRuntimeAudit() {
         productName: 'EvoCheck Premium Linx CGM'
       })
     });
+    if (oppCreateRes.data?.data?.id) {
+      createdOppIds.push(oppCreateRes.data.data.id);
+    }
     assert(
       oppCreateRes.status === 201 && oppCreateRes.data?.data?.estimatedValuePKR === expectedValue,
       `POST /api/v1/sales/opportunities with ${units} unit(s) calculates exactly PKR ${expectedValue.toLocaleString()}`
     );
+  }
+
+  // Teardown test opportunities to preserve clean baseline store
+  for (const oppId of createdOppIds) {
+    await request(`/api/v1/sales/opportunities/${oppId}`, { method: 'DELETE' });
   }
 
   // 4. AI Runtime Grounding & Guardrails (All 14 Required Scenarios)
@@ -263,6 +272,9 @@ async function runRuntimeAudit() {
 
   const malformedOpp = await request('/api/v1/sales/opportunities', { method: 'POST', body: JSON.stringify({}) });
   assert(malformedOpp.status === 201 || malformedOpp.status === 400, 'POST /api/v1/sales/opportunities with empty body handled safely without crashing');
+  if (malformedOpp.data?.data?.id) {
+    await request(`/api/v1/sales/opportunities/${malformedOpp.data.data.id}`, { method: 'DELETE' });
+  }
 
   console.log('\n================================================================');
   console.log(`🏁 RUNTIME SUITE COMPLETE: ${passedTests}/${totalTests} TESTS PASSED (${((passedTests/totalTests)*100).toFixed(1)}%)`);
