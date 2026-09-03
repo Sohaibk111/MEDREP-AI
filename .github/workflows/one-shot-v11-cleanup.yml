@@ -90,7 +90,7 @@ jobs:
 
       - name: Validate
         run: |
-          npm ci
+          npm install
           npx tsc --noEmit
           npx tsx tests/api_verification_test.ts
           npx tsx tests/runtime-smoke-test.ts
