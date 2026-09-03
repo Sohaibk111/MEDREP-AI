@@ -88,6 +88,17 @@ function loadDurableStore(): CRMStore {
   };
 }
 
+function getTodayISO(): string {
+  const configured = process.env.MEDREP_TODAY?.trim();
+  if (configured && /^\d{4}-\d{2}-\d{2}$/.test(configured)) return configured;
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatTodayDate(iso: string): string {
+  const date = new Date(`${iso}T00:00:00Z`);
+  return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date);
+}
+
 const store = loadDurableStore();
 let doctors: Doctor[] = store.doctors;
 let visits: Visit[] = store.visits;
@@ -153,7 +164,7 @@ async function startServer() {
 
   // 1. Dashboard Briefing
   app.get('/api/v1/briefing', (req: Request, res: Response) => {
-    const today = '2026-09-01';
+    const today = getTodayISO();
     const todaysVisits = visits.filter(v => v.scheduledDate === today);
     const completedVisits = todaysVisits.filter(v => v.status === 'completed');
     const urgentFollowups = followups.filter(f => f.status === 'pending');
@@ -211,7 +222,7 @@ async function startServer() {
       success: true,
       data: {
         date: today,
-        todayDate: 'Tuesday, Sept 1, 2026',
+        todayDate: formatTodayDate(today),
         territory: 'Rawalpindi-East (PWD/Soan/Saidpur) & Islamabad',
         visitsTarget: 8,
         visitsPlanned: todaysVisits.length,
@@ -348,7 +359,7 @@ async function startServer() {
       doctorSpecialty: doc ? doc.specialty : 'Specialist',
       hospitalClinic: doc ? doc.clinic || doc.hospital : 'Clinic',
       area: doc ? doc.area : 'Rawalpindi',
-      scheduledDate: scheduledDate || '2026-09-01',
+      scheduledDate: scheduledDate || getTodayISO(),
       scheduledTime: scheduledTime || '12:00 PM',
       status: 'planned',
       objectives: objectives || [
