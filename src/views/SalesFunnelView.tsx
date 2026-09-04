@@ -27,6 +27,10 @@ export const SalesFunnelView: React.FC<SalesFunnelViewProps> = ({
   onUpdateStage,
   onOpenDoctorDetail
 }) => {
+  const safeOpps: AnonymousPatientOpportunity[] = Array.isArray(opportunities)
+    ? opportunities
+    : ((opportunities as any)?.opportunities || []);
+
   const stages: { id: AnonymousPatientOpportunity['status']; label: string; color: string }[] = [
     { id: 'recommended', label: 'Doctor Recommended', color: 'bg-sky-50 text-[#0ea5e9] border-sky-200' },
     { id: 'trial_scheduled', label: 'Trial Scheduled', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
@@ -34,14 +38,14 @@ export const SalesFunnelView: React.FC<SalesFunnelViewProps> = ({
     { id: 'reordered', label: 'Active Reorder', color: 'bg-purple-50 text-purple-700 border-purple-200' }
   ];
 
-  const totalRevenuePKR = opportunities
+  const totalRevenuePKR = safeOpps
     .filter(o => (o.stage === 'sensor_installed' || o.status === 'sensor_installed' || o.stage === 'reordered' || o.status === 'reordered'))
     .reduce((sum, o) => sum + (o.totalValue || o.estimatedValuePKR || 0), 0);
 
-  const totalPotentialPKR = opportunities
+  const totalPotentialPKR = safeOpps
     .reduce((sum, o) => sum + (o.totalValue || o.estimatedValuePKR || 0), 0);
 
-  const totalUnits = opportunities.reduce((sum, o) => sum + (o.units || 1), 0);
+  const totalUnits = safeOpps.reduce((sum, o) => sum + (o.units || 1), 0);
 
   return (
     <div className="space-y-5 animate-in fade-in duration-300">
@@ -99,10 +103,26 @@ export const SalesFunnelView: React.FC<SalesFunnelViewProps> = ({
         </div>
       </div>
 
-      {/* Funnel Columns Pipeline */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stages.map((stage) => {
-          const stageOpps = opportunities.filter(o => o.status === stage.id || o.stage === stage.id);
+      {/* Funnel Columns Pipeline or Empty State */}
+      {safeOpps.length === 0 ? (
+        <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-[#cbd5e1] space-y-3">
+          <Layers className="w-10 h-10 text-[#94a3b8] mx-auto" />
+          <h3 className="text-sm font-bold text-[#0f172a]">No Patient Opportunities Registered</h3>
+          <p className="text-xs text-[#64748b] max-w-sm mx-auto">
+            There are currently no anonymous patient leads in the sales pipeline. Click the button below to register a doctor recommendation.
+          </p>
+          <button
+            onClick={onAddOpportunity}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#0f172a] hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
+          >
+            <Plus className="w-4 h-4 text-emerald-400" />
+            <span>New Patient Opportunity</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {stages.map((stage) => {
+            const stageOpps = safeOpps.filter(o => o.status === stage.id || o.stage === stage.id);
           return (
             <div key={stage.id} className="bg-[#f8fafc] border border-[#e2e8f0] rounded-2xl p-4 flex flex-col min-h-[360px]">
               <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#e2e8f0]">
@@ -195,6 +215,7 @@ export const SalesFunnelView: React.FC<SalesFunnelViewProps> = ({
           );
         })}
       </div>
+      )}
     </div>
   );
 };

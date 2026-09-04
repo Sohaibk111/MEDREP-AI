@@ -108,7 +108,12 @@ export function App() {
       if (briefingRes.success) setBriefingData(briefingRes.data);
       if (doctorsRes.success) setDoctors(doctorsRes.data);
       if (tasksRes.success) setTasks(tasksRes.data);
-      if (salesRes.success) setOpportunities(salesRes.data);
+      if (salesRes.success) {
+        const oppsList = Array.isArray(salesRes.data)
+          ? salesRes.data
+          : (salesRes.data?.opportunities || []);
+        setOpportunities(oppsList);
+      }
       if (plannerRes.success) setPlannerData(plannerRes.data);
       if (knowledgeRes.success) setKnowledge(knowledgeRes.data);
       if (conflictsRes.success) setConflicts(conflictsRes.data);
