@@ -6,6 +6,8 @@ import {
 import { isValidISODate } from '../utils/dateUtils';
 import { getPrescriberJourneyStage } from './routeEngine';
 
+const RECENT_SIGNAL_DAYS = 30;
+
 export function lifecycleForFieldIntelligence(doc: Doctor): PrescriberLifecycleStatus {
   if (doc.prescriberStatus === 'dormant') return 'DORMANT';
   if (doc.prescriberStatus === 'advocate' && doc.relationshipStrength >= 4) return 'CHAMPION';
@@ -27,11 +29,25 @@ function evidence(code: FieldIntelligenceEvidence['code'], label: string, points
 }
 export function getCallingWindows(doc: Doctor, date: string): DoctorTiming[] {
   if (!isValidISODate(date)) return [];
-  return (doc.timings || []).filter(t => t.dayOfWeek === weekday(date)).sort((a, b) => timeMinutes(a.startTime) - timeMinutes(b.startTime));
+  return (doc.timings || []).filter(t => t.dayOfWeek === weekday(date)).sort((a, b) => timeMinutes(a.startTime) - timeMinutes(b.startTime) || a.id.localeCompare(b.id));
 }
 function activeOpportunities(opps: AnonymousPatientOpportunity[]) { return opps.filter(o => o.status !== 'declined'); }
 function latest<T>(items: T[], stamp: (item: T) => string | undefined): T | undefined {
-  return [...items].sort((a, b) => (stamp(b) || '').localeCompare(stamp(a) || ''))[0];
+  return [...items].sort((a, b) => (stamp(b) || '').localeCompare(stamp(a) || '') || JSON.stringify(b).localeCompare(JSON.stringify(a)))[0];
+}
+function daysBetween(fromISO: string, toISO: string): number {
+  const from = Date.parse(`${fromISO}T00:00:00Z`);
+  const to = Date.parse(`${toISO}T00:00:00Z`);
+  return Number.isFinite(from) && Number.isFinite(to) ? Math.max(0, Math.floor((to - from) / 86400000)) : RECENT_SIGNAL_DAYS;
+}
+function isRecentTimestamp(timestamp: string | undefined, targetDate: string): boolean {
+  if (!timestamp) return false;
+  const date = timestamp.slice(0, 10);
+  return isValidISODate(date) && date <= targetDate && daysBetween(date, targetDate) <= RECENT_SIGNAL_DAYS;
+}
+function interactionDate(v: Visit): string | undefined { return v.scheduledDate; }
+function sampleForDoctor(samples: SampleTransaction[], doctorId: string): SampleTransaction | undefined {
+  return latest(samples.filter(s => s.doctorId === doctorId && s.transactionType === 'ISSUED'), s => s.recordedAt);
 }
 
 export interface FieldIntelligenceInput {
@@ -40,11 +56,12 @@ export interface FieldIntelligenceInput {
 }
 
 export function assessDoctor(doc: Doctor, input: FieldIntelligenceInput): DoctorPriorityAssessment {
-  const { visits, followups, opportunities, outcomes = [], targetDate } = input;
+  const { visits, followups, opportunities, outcomes = [], samples = [], targetDate } = input;
   const docVisits = visits.filter(v => v.doctorId === doc.id);
   const docTasks = followups.filter(f => f.doctorId === doc.id && f.status === 'pending');
   const docOpps = activeOpportunities(opportunities.filter(o => o.doctorId === doc.id));
   const docOutcomes = outcomes.filter(o => o.doctorId === doc.id);
+  const docSamples = samples.filter(s => s.doctorId === doc.id);
   const scheduled = docVisits.find(v => v.scheduledDate === targetDate && v.status === 'in_progress') || docVisits.find(v => v.scheduledDate === targetDate && v.status === 'planned');
   const windows = getCallingWindows(doc, targetDate);
   const lifecycle = lifecycleForFieldIntelligence(doc);
@@ -53,7 +70,15 @@ export function assessDoctor(doc: Doctor, input: FieldIntelligenceInput): Doctor
   const overdue = docTasks.filter(t => t.dueDate < targetDate);
   const dueToday = docTasks.filter(t => t.dueDate === targetDate);
   const recentOutcome = latest(docOutcomes, o => o.timestamp);
-  const recentObjection = docVisits.flatMap(v => v.objections || []).find(o => !o.resolved) || docVisits.flatMap(v => v.objections || [])[0];
+  const recentObjectionVisit = latest(docVisits.filter(v => (v.objections || []).some(o => !o.resolved)), interactionDate);
+  const recentObjection = recentObjectionVisit?.objections?.filter(o => !o.resolved).sort((a, b) => a.id.localeCompare(b.id))[0];
+  const recentSample = sampleForDoctor(docSamples, doc.id);
+  const latestVisit = latest(docVisits, interactionDate);
+  const latestOutcome = latest(docOutcomes, o => o.timestamp);
+  const latestSample = latest(docSamples, s => s.recordedAt);
+  const interactionDates = [latestVisit?.scheduledDate, latestOutcome?.timestamp?.slice(0, 10), latestSample?.recordedAt?.slice(0, 10)].filter((d): d is string => Boolean(d));
+  const latestInteractionDate = interactionDates.sort((a, b) => b.localeCompare(a))[0];
+  const hasRecentInteraction = latestInteractionDate ? isRecentTimestamp(latestInteractionDate, targetDate) : false;
   let score = 0;
   if (scheduled?.status === 'in_progress') { score += 30; reasons.push(evidence('IN_PROGRESS_VISIT', 'Visit is currently in progress', 30, 'VISIT', [scheduled.id])); }
   else if (scheduled) { score += 20; reasons.push(evidence('SCHEDULED_VISIT', 'Visit is scheduled for this date', 20, 'VISIT', [scheduled.id])); }
@@ -63,40 +88,61 @@ export function assessDoctor(doc: Doctor, input: FieldIntelligenceInput): Doctor
   score += tierPoints; reasons.push(evidence('HIGH_PRIORITY_TIER', `Priority Tier ${doc.priority}`, tierPoints, 'DOCTOR', [doc.id]));
   if (journey === 'TRIALING') { score += 18; reasons.push(evidence('TRIAL_ACTIVE', 'Active trial requires follow-up', 18, 'DOCTOR', [doc.id])); }
   else if (journey === 'ADOPTING' || journey === 'HIGH_PRESCRIBER') { score += 14; reasons.push(evidence('ADOPTER_GROWTH_OPPORTUNITY', 'Adopting prescriber has growth potential', 14, 'DOCTOR', [doc.id])); }
-  else if (lifecycle === 'ENGAGED' || lifecycle === 'PROSPECT') score += 10;
+  else if (lifecycle === 'ENGAGED' || lifecycle === 'PROSPECT') { score += 10; reasons.push(evidence('ADOPTER_GROWTH_OPPORTUNITY', `${lifecycle} doctor is an active development candidate`, 10, 'LIFECYCLE', [doc.id])); }
   else if (lifecycle === 'DORMANT' && (docTasks.length || docOpps.length)) { score += 8; reasons.push(evidence('DORMANT_REACTIVATION', 'Dormant doctor has an actionable CRM signal', 8, 'DOCTOR', [doc.id])); }
   const potential = Math.round(Math.max(0, Math.min(100, doc.potentialScore || 0)) * .15);
   if (potential) { score += potential; reasons.push(evidence('HIGH_POTENTIAL', `Potential score ${doc.potentialScore}/100`, potential, 'DOCTOR', [doc.id])); }
   if (doc.relationshipStrength > 0) { score += Math.min(5, doc.relationshipStrength); reasons.push(evidence('HIGH_RELATIONSHIP_STRENGTH', `Relationship strength ${doc.relationshipStrength}/5`, Math.min(5, doc.relationshipStrength), 'DOCTOR', [doc.id])); }
   const oppPoints = Math.min(10, docOpps.length * 3);
   if (oppPoints) { score += oppPoints; reasons.push(evidence('OPEN_PATIENT_OPPORTUNITY', `${docOpps.length} active patient opportunity(s)`, oppPoints, 'OPPORTUNITY', docOpps.map(o => o.id))); }
-  if (recentOutcome && ['CONVERTED', 'TRIAL_STARTED'].includes(recentOutcome.outcomeType)) { score += 8; reasons.push(evidence('RECENT_CONVERSION_SIGNAL', `Recent ${recentOutcome.outcomeType.replace('_', ' ').toLowerCase()}`, 8, 'OUTCOME', [recentOutcome.id])); }
-  if (recentObjection) { score += 6; reasons.push(evidence('RECENT_OBJECTION', 'Recent objection needs preparation', 6, 'VISIT', docVisits.filter(v => (v.objections || []).includes(recentObjection)).map(v => v.id))); }
+  if (recentOutcome && ['CONVERTED', 'TRIAL_STARTED'].includes(recentOutcome.outcomeType) && isRecentTimestamp(recentOutcome.timestamp, targetDate)) { score += 8; reasons.push(evidence('RECENT_CONVERSION_SIGNAL', `Recent ${recentOutcome.outcomeType.replace('_', ' ').toLowerCase()}`, 8, 'OUTCOME', [recentOutcome.id])); }
+  if (recentObjection && recentObjectionVisit && isRecentTimestamp(recentObjectionVisit.scheduledDate, targetDate)) { score += 6; reasons.push(evidence('RECENT_OBJECTION', 'Recent unresolved objection needs preparation', 6, 'VISIT', [recentObjectionVisit.id, recentObjection.id])); }
+  if (!hasRecentInteraction) {
+    const gapPoints = latestInteractionDate ? Math.min(8, Math.max(0, daysBetween(latestInteractionDate, targetDate) - RECENT_SIGNAL_DAYS + 1)) : 8;
+    if (gapPoints > 0) reasons.push(evidence('NO_RECENT_INTERACTION', latestInteractionDate ? `No interaction recorded within ${RECENT_SIGNAL_DAYS} days` : 'No interaction history is recorded', gapPoints, latestInteractionDate ? 'VISIT' : 'DOCTOR', [latestVisit?.id || doc.id]));
+    score += gapPoints;
+  }
   if (windows.length) reasons.push(evidence(windows[0].source === 'field_verified' ? 'CALLING_WINDOW_AVAILABLE' : 'CALLING_WINDOW_UNVERIFIED', `Calling window ${windows[0].startTime}–${windows[0].endTime}`, 0, 'DOCTOR', [windows[0].id]));
   else reasons.push(evidence('NO_CALLING_WINDOW_TODAY', 'No recorded calling window for this date', 0, 'DOCTOR', [doc.id]));
   const eligibility = scheduled?.status === 'in_progress' ? 'IN_PROGRESS' : scheduled ? 'SCHEDULED' : (windows.length || overdue.length || dueToday.length) ? 'ELIGIBLE' : 'INELIGIBLE';
-  const action = nextBestAction({ doc, targetDate, scheduled, overdue, dueToday, docOpps, journey, lifecycle, recentObjection, windows, reasons, recentOutcome });
+  const action = nextBestAction({ doc, targetDate, scheduled, overdue, dueToday, docOpps, journey, lifecycle, recentObjection, recentObjectionVisit, recentSample, windows, reasons, recentOutcome });
   return { doctorId: doc.id, targetDate, eligibility, ineligibilityReasons: eligibility === 'INELIGIBLE' ? ['NO_CALLING_WINDOW_TODAY'] : [], score: Math.min(100, Math.max(0, score)), lifecycle, journey, reasons, nextBestAction: action };
 }
 
 function nextBestAction(ctx: any): NextBestAction {
   const base = { linkedOpportunityIds: ctx.docOpps.map((o: AnonymousPatientOpportunity) => o.id), evidence: ctx.reasons as FieldIntelligenceEvidence[] };
   if (ctx.scheduled?.status === 'in_progress') return { ...base, type: 'VISIT', objective: 'Complete the current consultation and log a factual outcome.', timing: 'TODAY', reasonCodes: ['IN_PROGRESS_VISIT'], linkedVisitId: ctx.scheduled.id };
-  if (ctx.overdue.length || ctx.dueToday.length) { const task = ctx.overdue[0] || ctx.dueToday[0]; return { ...base, type: 'FOLLOW_UP', objective: `Complete follow-up: ${task.title}`, timing: 'TODAY', reasonCodes: [ctx.overdue.length ? 'OVERDUE_FOLLOW_UP' : 'FOLLOW_UP_DUE_TODAY'], linkedFollowupId: task.id }; }
+  if (ctx.overdue.length || ctx.dueToday.length) { const task = ctx.overdue[0] || ctx.dueToday[0]; return { ...base, type: 'FOLLOW_UP', objective: `Complete follow-up: ${task.title}`, timing: 'TODAY', reasonCodes: [ctx.overdue.length ? 'OVERDUE_FOLLOW_UP' : 'FOLLOW_UP_DUE_TODAY'], linkedFollowupId: task.id };
+  }
   if (ctx.journey === 'TRIALING') return { ...base, type: 'TRIAL_FOLLOW_UP', objective: 'Review trial feedback and agree the next documented step.', timing: 'THIS_WEEK', reasonCodes: ['TRIAL_ACTIVE'] };
-  if (ctx.recentObjection) return { ...base, type: 'OBJECTION_HANDLING', objective: 'Prepare a verified response to the documented objection.', timing: 'WHEN_WINDOW_AVAILABLE', reasonCodes: ['RECENT_OBJECTION'] };
+  if (ctx.recentSample && isRecentTimestamp(ctx.recentSample.recordedAt, ctx.targetDate)) return { ...base, type: 'SAMPLE_FOLLOW_UP', objective: 'Review the recent sample experience and document the next appropriate step.', timing: 'THIS_WEEK', reasonCodes: ['OPEN_PATIENT_OPPORTUNITY'], linkedOutcomeId: undefined };
   if (ctx.docOpps.length) return { ...base, type: 'CONVERSION_OPPORTUNITY', objective: 'Review active patient opportunities and agree the next appropriate step.', timing: 'WHEN_WINDOW_AVAILABLE', reasonCodes: ['OPEN_PATIENT_OPPORTUNITY'] };
+  if (ctx.recentObjection && ctx.recentObjectionVisit && isRecentTimestamp(ctx.recentObjectionVisit.scheduledDate, ctx.targetDate)) return { ...base, type: 'OBJECTION_HANDLING', objective: 'Prepare a verified response to the documented objection.', timing: 'WHEN_WINDOW_AVAILABLE', reasonCodes: ['RECENT_OBJECTION'] };
   if (ctx.lifecycle === 'DORMANT' && !ctx.windows.length) return { ...base, type: 'NO_ACTION', objective: 'No actionable CRM signal or calling window is recorded.', timing: 'NO_ACTION', reasonCodes: ['NO_CALLING_WINDOW_TODAY'] };
   if (ctx.windows.length) return { ...base, type: ctx.lifecycle === 'DORMANT' ? 'REACTIVATION' : 'VISIT', objective: ctx.lifecycle === 'DORMANT' ? 'Re-establish contact around a documented need.' : 'Conduct discovery and document one need or objection.', timing: 'WHEN_WINDOW_AVAILABLE', reasonCodes: ['CALLING_WINDOW_AVAILABLE'] };
   return { ...base, type: 'NO_ACTION', objective: 'No actionable CRM signal or calling window is recorded.', timing: 'NO_ACTION', reasonCodes: ['NO_CALLING_WINDOW_TODAY'] };
 }
 
+function priorityRank(a: DoctorPriorityAssessment): number { return a.eligibility === 'IN_PROGRESS' ? 0 : a.eligibility === 'SCHEDULED' ? 1 : 2; }
+function tierRank(doc: Doctor): number { return doc.priority === 'A' ? 0 : doc.priority === 'B' ? 1 : 2; }
+function earliestWindowStart(a: DoctorPriorityAssessment, doctors: Doctor[]): number {
+  const doc = doctors.find(d => d.id === a.doctorId);
+  const window = doc ? getCallingWindows(doc, a.targetDate)[0] : undefined;
+  return window ? timeMinutes(window.startTime) : Number.MAX_SAFE_INTEGER;
+}
+
 export function buildFieldIntelligence(input: FieldIntelligenceInput) {
   if (!isValidISODate(input.targetDate)) throw new Error('Invalid target date');
   const assessments = input.doctors.map(d => assessDoctor(d, input));
-  const eligible = assessments.filter(a => a.eligibility !== 'INELIGIBLE').sort((a, b) => b.score - a.score || a.doctorId.localeCompare(b.doctorId));
+  const eligible = assessments.filter(a => a.eligibility !== 'INELIGIBLE').sort((a, b) =>
+    priorityRank(a) - priorityRank(b) ||
+    b.score - a.score ||
+    earliestWindowStart(a, input.doctors) - earliestWindowStart(b, input.doctors) ||
+    tierRank(input.doctors.find(d => d.id === a.doctorId)!) - tierRank(input.doctors.find(d => d.id === b.doctorId)!) ||
+    a.doctorId.localeCompare(b.doctorId)
+  );
   eligible.forEach((a, index) => a.rank = index + 1);
-  return { candidates: eligible, deferredCandidates: assessments.filter(a => a.eligibility === 'INELIGIBLE').sort((a, b) => a.doctorId.localeCompare(b.doctorId)), algorithmVersion: 'v1.3-deterministic-1' };
+  return { candidates: eligible, deferredCandidates: assessments.filter(a => a.eligibility === 'INELIGIBLE').sort((a, b) => a.doctorId.localeCompare(b.doctorId)), algorithmVersion: 'v1.3-deterministic-2' };
 }
 
 export function buildPreVisitIntelligence(doc: Doctor, input: FieldIntelligenceInput & { samples?: SampleTransaction[] }): PreVisitIntelligence {
