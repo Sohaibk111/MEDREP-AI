@@ -623,6 +623,8 @@ export type PrescriberJourneyState =
 export interface VisitOutcomeRecord {
   id: string;
   visitId: string;
+  /** Stable client submission key used to safely retry a field outcome. */
+  clientVisitId?: string;
   doctorId: string;
   outcomeType: VisitOutcomeType;
   timestamp: string;
@@ -780,6 +782,8 @@ export interface DashboardBriefingStats {
   plannedVisitsToday: number;
   activePatientOpportunities: number;
   verifiedDoctorsCount: number;
+  sampleUnitsOnHand?: number;
+  championsCount?: number;
 }
 
 export interface DashboardBriefingData {
@@ -804,4 +808,64 @@ export interface DashboardBriefingData {
   todayVisitsQueue: Visit[];
   urgentTasks: FollowupTask[];
   topTerritoryOpportunities: AnonymousPatientOpportunity[];
+  operationalMetrics?: {
+    samplesOnHand: number;
+    samplesIssuedToday: number;
+    monthlyTarget: number;
+    monthlyAchieved: number;
+    monthlyPacingPercent: number;
+    championsCount: number;
+  };
+}
+
+// ==========================================
+// MEDREP AI v1.2 RECONCILIATION TYPES
+// ==========================================
+
+export type PrescriberLifecycleStatus = 'PROSPECT' | 'ENGAGED' | 'TRIAL' | 'ADOPTER' | 'CHAMPION' | 'DORMANT';
+
+export interface SampleInventoryItem {
+  productId: string;
+  productName: string;
+  openingBalance: number;
+  quantityOnHand: number;
+  reorderLevel: number;
+  updatedAt: string;
+}
+
+export interface SampleTransaction {
+  id: string;
+  productId: string;
+  doctorId: string;
+  visitId?: string;
+  quantity: number;
+  transactionType: 'ISSUED' | 'ADJUSTMENT';
+  recordedAt: string;
+  notes?: string;
+}
+
+export interface MonthlyTarget {
+  month: string; // YYYY-MM
+  targetUnits: number;
+  achievedUnits: number;
+  updatedAt: string;
+}
+
+export interface LifecycleHistoryRecord {
+  id: string;
+  doctorId: string;
+  previousStatus: PrescriberLifecycleStatus;
+  status: PrescriberLifecycleStatus;
+  reason: string;
+  source: 'AUTOMATIC' | 'MANUAL_OVERRIDE';
+  recordedAt: string;
+}
+
+export interface DoctorTimelineEvent {
+  id: string;
+  type: 'VISIT' | 'OUTCOME' | 'SAMPLE' | 'LIFECYCLE' | 'OPPORTUNITY';
+  occurredAt: string;
+  title: string;
+  detail?: string;
+  visitId?: string;
 }
