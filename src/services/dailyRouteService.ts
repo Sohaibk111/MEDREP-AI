@@ -17,7 +17,7 @@ export function buildDailyRoutePlan(input: FieldIntelligenceInput & { fieldPlan:
     const doctor = input.doctors.find(d => d.id === a.doctorId)!;
     const window = getCallingWindows(doctor, input.targetDate)[0];
     return { ...a, routeSequence: 0, areaClusterKey: clusterFor(doctor), callingWindow: window && { startTime: window.startTime, endTime: window.endTime, locationName: window.locationName } };
-  }).sort((a, b) => a.areaClusterKey.localeCompare(b.areaClusterKey) || (a.callingWindow?.startTime || '').localeCompare(b.callingWindow?.startTime || '') || b.score - a.score || a.doctorId.localeCompare(b.doctorId));
+  });
   recommendedStops.forEach((stop, index) => stop.routeSequence = immutableScheduledStops.length + index + 1);
   return {
     date: input.targetDate,
@@ -26,7 +26,7 @@ export function buildDailyRoutePlan(input: FieldIntelligenceInput & { fieldPlan:
     immutableScheduledStops,
     recommendedStops,
     deferredCandidates: intelligence.deferredCandidates,
-    routeReasoning: ['Scheduled visits remain fixed.', 'Additional doctors are ranked from CRM facts and date-aware calling windows.', 'Recommended stops are grouped by existing area labels only.'],
+    routeReasoning: ['Scheduled visits remain fixed.', 'Additional doctors are ranked from CRM facts and date-aware calling windows.', 'Recommended stops retain deterministic field-intelligence order; area labels are descriptive only.'],
     limitations: ['No verified geographic coordinates, travel-time matrix, distance, or traffic data is available. Area labels and calling windows only are used.']
   };
 }
