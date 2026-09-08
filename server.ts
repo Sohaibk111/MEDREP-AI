@@ -1,3 +1,5 @@
+import { buildCompetitorGroundingContext } from './src/services/competitorIntelligence';
+import { sanitizeCompetitorGeneratedText } from './src/services/competitorClaimGuard';
 import { GEMINI_MODEL } from './src/config/ai';
 import express, { Request, Response } from 'express';
 import path from 'path';
@@ -1051,6 +1053,9 @@ async function startServer() {
 
     const ai = getAIClient();
     const verifiedKnowledgeContext = getVerifiedEvoCheckAIContext();
+    const competitorGrounding = buildCompetitorGroundingContext(
+      `${pastObjections} ${doc.notes || ''}`
+    );
 
     if (ai) {
       try {
@@ -1058,6 +1063,8 @@ async function startServer() {
 You are the elite AI Sales Coach for MedRep AI, assisting a field Product Specialist for EvoCheck Continuous Glucose Monitoring (CGM).
 
 ${verifiedKnowledgeContext}
+
+${competitorGrounding.context}
 
 Target Doctor:
 - Name: ${doc.name}
@@ -1076,6 +1083,11 @@ STRICT COMPLIANCE & PROVENANCE INSTRUCTIONS:
 4. If information is absent or not in the knowledge base, state: "This EvoCheck specification is not currently available in the verified MedRep AI knowledge base."
 5. Never infer an EvoCheck specification from a competitor. Never invent product claims.
 6. Tag facts as [FACT], inferences as [INFERENCE], and action advice as [RECOMMENDATION].
+7. For competitor-specific claims, use ONLY the controlled competitor intelligence above.
+8. Preserve [VERIFIED], [USER_PROVIDED], [NEEDS_VERIFICATION], and [UNKNOWN] provenance labels.
+9. Never invent missing competitor facts. If a competitor field is UNKNOWN, say it is unavailable in the current MedRep AI competitor knowledge base.
+10. Never infer NFC/scanning workflows, IP ratings, reader requirements, connectivity, prices, regulatory status, weaknesses, or superiority claims.
+11. Do not turn a single specification into overall clinical superiority.
 
 Return a JSON matching this exact structure:
 {
@@ -1432,6 +1444,7 @@ Extract and return strictly a valid JSON object matching:
 
     const ai = getAIClient();
     const verifiedKnowledgeContext = getVerifiedEvoCheckAIContext();
+    const competitorGrounding = buildCompetitorGroundingContext(query);
 
     const crmContext = `
 MedRep AI CRM Context:
@@ -1465,6 +1478,16 @@ CRITICAL KNOWLEDGE & PRICING GUARDRAILS:
 
 ${crmContext}
 
+${competitorGrounding.context}
+
+COMPETITOR PROVENANCE & ANTI-HALLUCINATION RULES:
+1. Use only controlled competitor intelligence for competitor-specific claims.
+2. Preserve [VERIFIED], [USER_PROVIDED], [NEEDS_VERIFICATION], and [UNKNOWN] labels.
+3. Never invent missing competitor facts.
+4. Never infer NFC/scanning workflows, IP ratings, reader requirements, connectivity, prices, regulatory status, weaknesses, or superiority claims.
+5. If a field is UNKNOWN, say it is unavailable in the current MedRep AI competitor knowledge base.
+6. Do not turn a single specification into overall clinical superiority.
+
 User Question: "${query}"
 `;
 
@@ -1473,7 +1496,21 @@ User Question: "${query}"
           contents: prompt
         });
 
-        return res.json({ success: true, text: response.text });
+        const guarded = sanitizeCompetitorGeneratedText(
+          query,
+          response.text || '',
+          competitorGrounding.matchedCompetitorIds
+        );
+
+        return res.json({
+          success: true,
+          text: guarded.text,
+          competitorGuard: {
+            safe: guarded.safe,
+            violations: guarded.violations,
+            matchedCompetitorIds: guarded.matchedCompetitorIds
+          }
+        });
       } catch (err) {
         console.error('Gemini Chat error:', err);
       }
@@ -1524,7 +1561,21 @@ User Question: "${query}"
       text = `[FACT] Today's prioritized route covers Shifa International Hospital (Prof. Dr. Jamal Ahmed, 11:00 AM) and PWD (Dr. Sarah Khan, 12:30 PM).\n\n[RECOMMENDATION] Ensure you carry the EvoCheck demonstration applicator and verified 8.66% MARD technical one-pagers for both calls.`;
     }
 
-    res.json({ success: true, text });
+    const guardedFallback = sanitizeCompetitorGeneratedText(
+      query,
+      text,
+      competitorGrounding.matchedCompetitorIds
+    );
+
+    res.json({
+      success: true,
+      text: guardedFallback.text,
+      competitorGuard: {
+        safe: guardedFallback.safe,
+        violations: guardedFallback.violations,
+        matchedCompetitorIds: guardedFallback.matchedCompetitorIds
+      }
+    });
   });
 
   // 12b. AI Objection Scenarios & Drill Evaluator (v1.1)

@@ -28,7 +28,7 @@ function run() {
   const grounding = buildCompetitorGroundingContext('Compare EvoCheck with Abbott FreeStyle Libre');
   assert.deepEqual(grounding.matchedCompetitorIds, ['abbott-freestyle-libre']);
   assert(grounding.context.includes('[USER_PROVIDED]'), 'grounding preserves provenance status');
-  assert(grounding.context.includes('Do not invent a missing competitor specification.'), 'guardrail is present');
+  assert(grounding.context.includes('Never invent a missing competitor specification.'), 'guardrail is present');
   assert(grounding.context.includes('No unsupported claim of overall clinical superiority'), 'comparison guardrail is preserved');
 
   const unknownGrounding = buildCompetitorGroundingContext('Dexcom G7');
