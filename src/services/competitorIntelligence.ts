@@ -30,11 +30,27 @@ function normalize(value: string): string {
 
 function aliasesFor(record: CompetitorIntelligenceRecord): string[] {
   switch (record.productId) {
-    case 'abbott-freestyle-libre':
-      return ['abbott', 'free style libre', 'freestyle libre', 'libre', 'libre 1', 'libre 2'];
-    case 'sibionics-cgm':
-      return ['sibionics', 'sibionics cgm'];
-    case 'ican-sinocare':
+    case 'abbott-freestyle-libre-1':
+      return [
+        'abbott freestyle libre 1',
+        'free style libre 1',
+        'freestyle libre 1',
+        'libre 1',
+        'original freestyle libre',
+        'freestyle libre 14 day',
+        'libre 14 day'
+      ];
+    case 'abbott-freestyle-libre-2':
+      return [
+        'abbott freestyle libre 2',
+        'free style libre 2',
+        'freestyle libre 2',
+        'libre 2',
+        'fsl 2'
+      ];
+    case 'sibionics-gs1':
+      return ['sibionics', 'sibionics cgm', 'sibionics gs1', 'gs1'];
+    case 'ican-sinocare-ican-i3':
       return ['ican', 'ican i3', 'sinocare', 'sinocare ican', 'sinocare ican i3'];
     default:
       return [];
@@ -75,20 +91,37 @@ function formatFact(label: string, fact: CompetitorFact): string {
   const value = fact.value === null ? 'UNKNOWN' : String(fact.value);
   const provenance = `[${fact.status}]`;
   const source = fact.source ? ` Source: ${fact.source}.` : '';
+  const sourceUrl = fact.sourceUrl ? ` Source URL: ${fact.sourceUrl}.` : '';
+  const observedAt = fact.observedAt ? ` Observed: ${fact.observedAt}.` : '';
   const notes = fact.notes ? ` Note: ${fact.notes}` : '';
-  return `- ${label}: ${value} ${provenance}.${source}${notes}`;
+  return `- ${label}: ${value} ${provenance}.${source}${sourceUrl}${observedAt}${notes}`;
 }
 
 function formatRecord(record: CompetitorIntelligenceRecord): string {
+  const priceObservations = record.marketPriceObservations.length
+    ? record.marketPriceObservations
+        .map(
+          observation =>
+            `PKR ${observation.valuePKR} (${observation.priceType}, observed ${observation.observedAt}, ${observation.source})`
+        )
+        .join('; ')
+    : 'No current Pakistan market price observation stored.';
+
   const lines = [
     `COMPETITOR: ${record.brandName}`,
+    `Variant: ${record.variant}`,
     `Manufacturer: ${record.manufacturer}`,
     formatFact('Price PKR', record.facts.pricePKR),
     formatFact('Wear duration (days)', record.facts.wearDurationDays),
     formatFact('MARD %', record.facts.mardPercent),
     formatFact('Real-time CGM', record.facts.realTimeCGM),
     formatFact('Connectivity', record.facts.connectivity),
+    formatFact('Scan workflow', record.facts.scanWorkflow),
     formatFact('Reader requirement', record.facts.readerRequirement),
+    formatFact('Water resistance', record.facts.waterResistance),
+    formatFact('Monitoring interval (minutes)', record.facts.monitoringIntervalMinutes),
+    formatFact('Alarm capability', record.facts.alarmCapability),
+    `Pakistan price observations: ${priceObservations}`,
     `Strengths: ${record.strengths.length ? record.strengths.join('; ') : 'Not stored in controlled knowledge base.'}`,
     `Weaknesses: ${record.weaknesses.length ? record.weaknesses.join('; ') : 'Not stored in controlled knowledge base.'}`,
     `Approved comparison facts: ${record.approvedComparisonFacts.length ? record.approvedComparisonFacts.join(' | ') : 'None.'}`,
