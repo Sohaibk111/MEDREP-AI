@@ -1,3 +1,4 @@
+import { GEMINI_MODEL } from './src/config/ai';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -1097,7 +1098,7 @@ Return a JSON matching this exact structure:
 `;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: GEMINI_MODEL,
           contents: prompt,
           config: {
             responseMimeType: 'application/json'
@@ -1259,7 +1260,7 @@ Extract and return strictly a valid JSON object matching:
 `;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: GEMINI_MODEL,
           contents: prompt,
           config: {
             responseMimeType: 'application/json'
@@ -1468,7 +1469,7 @@ User Question: "${query}"
 `;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: GEMINI_MODEL,
           contents: prompt
         });
 
