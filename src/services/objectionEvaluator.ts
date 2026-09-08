@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { GEMINI_MODEL } from '../config/ai';
 import { ObjectionScenarioDefinition, ObjectionDrillResponse, ObjectionDrillDimensionScore } from '../types';
 import { OBJECTION_SCENARIOS, getScenarioById } from '../data/objectionScenarios';
 
@@ -276,7 +277,7 @@ Return a JSON object matching this schema:
 `;
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: 'application/json'
