@@ -11,6 +11,7 @@ import {
   CompetitorFact,
   CompetitorIntelligenceRecord
 } from '../data/competitorIntelligence';
+import { EVOCHECK_COMMERCIAL_PRICING } from '../data/competitorIntelligence';
 
 export interface CompetitorClaimGuardResult {
   safe: boolean;
@@ -56,6 +57,12 @@ function valueMentioned(text: string, value: string | number): boolean {
   return normalizedText.includes(normalizedValue);
 }
 
+function priceValueMentioned(text: string, value: number): boolean {
+  const digits = String(value);
+  const formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return new RegExp(`\\b(?:${digits}|${formatted})\\b`).test(text);
+}
+
 function hasProvenanceNearValue(text: string, value: string | number, status: string): boolean {
   const raw = String(value);
   const index = text.toLowerCase().indexOf(raw.toLowerCase());
@@ -71,8 +78,8 @@ function unverifiedValueViolation(
   text: string
 ): string | null {
   if (fact.value === null || fact.status === 'VERIFIED') return null;
-  if (!valueMentioned(text, fact.value)) return null;
-  if (hasProvenanceNearValue(text, fact.value, fact.status)) return null;
+  if (!valueMentioned(text, String(fact.value))) return null;
+  if (hasProvenanceNearValue(text, String(fact.value), fact.status)) return null;
 
   return `${record.brandName}: ${label} value ${String(fact.value)} is ${fact.status} and cannot be presented as an independently verified fact.`;
 }
@@ -173,13 +180,58 @@ function mardViolation(record: CompetitorIntelligenceRecord, text: string): stri
 function priceViolation(record: CompetitorIntelligenceRecord, text: string): string | null {
   const fact = record.facts.pricePKR;
   if (!/\b(?:pkr|rs\.?|rupees?)\s*[0-9][0-9,]*/i.test(text)) return null;
+  if (record.commercialPrices.length) {
+    if (!record.commercialPrices.some(price => priceValueMentioned(text, price.valuePKR))) {
+      return `${record.brandName}: no matching channel-specific Pakistan price is stored in the controlled knowledge base.`;
+    }
+    return null;
+  }
   if (fact.status === 'UNKNOWN') {
     return `${record.brandName}: Pakistan price is UNKNOWN in the controlled knowledge base.`;
   }
-  if (fact.value !== null && valueMentioned(text, fact.value)) {
-    return unverifiedValueViolation(record, 'Pakistan price', fact, text);
-  }
+  if (fact.value !== null && priceValueMentioned(text, fact.value)) return null;
   return null;
+}
+
+function structuredPriceViolation(productName: string, prices: typeof EVOCHECK_COMMERCIAL_PRICING, text: string): string[] {
+  const violations: string[] = [];
+  const priceMatches = [...text.matchAll(/\b(?:pkr|rs\.?|rupees?)\s*([0-9][0-9,]*)/gi)];
+
+  for (const match of priceMatches) {
+    const value = Number(match[1].replace(/,/g, ''));
+    const price = prices.find(candidate => candidate.valuePKR === value);
+    if (!price) continue;
+
+    const matchIndex = match.index || 0;
+    const previousBoundary = Math.max(text.lastIndexOf('.', matchIndex), text.lastIndexOf(',', matchIndex), text.lastIndexOf('\n', matchIndex));
+    const nextBoundaries = [text.indexOf('.', matchIndex + match[0].length), text.indexOf(',', matchIndex + match[0].length), text.indexOf('\n', matchIndex + match[0].length)].filter(index => index >= 0);
+    const nextBoundary = nextBoundaries.length ? Math.min(...nextBoundaries) : text.length;
+    const window = text.slice(previousBoundary + 1, nextBoundary);
+    const hasPatient = /\bpatient\b/i.test(window);
+    const hasRetail = /\bretail\b/i.test(window);
+    const hasDistribution = /\b(distribution|distributor|trade)\b/i.test(window);
+    const hasOnline = /\b(online|web|website|e[- ]?commerce)\b/i.test(window);
+
+    if (hasPatient && price.priceType !== 'PATIENT') {
+      violations.push(`${productName}: generated patient price claim uses a ${price.priceType} price.`);
+    }
+    if (hasRetail && price.priceType !== 'RETAIL') {
+      violations.push(`${productName}: generated retail price claim uses a ${price.priceType} price.`);
+    }
+    if (hasDistribution && price.channel !== 'DISTRIBUTION') {
+      violations.push(`${productName}: generated distribution price claim uses the ${price.channel} price.`);
+    }
+    if (hasOnline && price.channel !== 'ONLINE') {
+      violations.push(`${productName}: generated online price claim uses the ${price.channel} price.`);
+    }
+
+    const hasTypeOrChannel = hasPatient || hasRetail || hasDistribution || hasOnline || /\bmarketplace\b|\bpromotional\b/i.test(window);
+    if (prices.length > 1 && !hasTypeOrChannel) {
+      violations.push(`${productName}: price ${value} requires an explicit price type or channel because multiple controlled prices exist.`);
+    }
+  }
+
+  return violations;
 }
 
 function hasUnsupportedCompetitorFact(text: string, record: CompetitorIntelligenceRecord): string[] {
@@ -190,15 +242,29 @@ function hasUnsupportedCompetitorFact(text: string, record: CompetitorIntelligen
     specificWaterResistanceViolation(record, text),
     mardViolation(record, text),
     priceViolation(record, text),
+    ...structuredPriceViolation(record.brandName, record.commercialPrices, text),
     unsupportedFieldViolation(record, record.facts.monitoringIntervalMinutes, 'monitoring interval', text, /\b(?:every|each)\s*\d+\s*(?:minute|min)\b|\b\d+\s*readings?\s*(?:per|a)\s*day\b/i),
     unsupportedFieldViolation(record, record.facts.alarmCapability, 'alarm capability', text, /\b(?:low|high|signal loss)\s*(?:glucose )?alarm|\balarms?\b/i)
   ].filter((value): value is string => Boolean(value));
+}
+
+function unknownCompetitorPriceViolation(text: string): string | null {
+  if (!/\b(?:pkr|rs\.?|rupees?)\s*[0-9][0-9,]*/i.test(text)) return null;
+  return 'Unknown competitor pricing is not stored in the controlled knowledge base.';
 }
 
 export function validateCompetitorGeneratedText(text: string): CompetitorClaimGuardResult {
   const output = text || '';
   const matched = COMPETITOR_INTELLIGENCE.filter(record => recordMentioned(output, record));
   const violations = matched.flatMap(record => hasUnsupportedCompetitorFact(output, record));
+  const evocheckMentioned = /\bevocheck\b/i.test(output);
+  if (!matched.length && !evocheckMentioned) {
+    const unknownPriceViolation = unknownCompetitorPriceViolation(output);
+    if (unknownPriceViolation) violations.push(unknownPriceViolation);
+  }
+  if (evocheckMentioned && /\b(?:pkr|rs\.?|rupees?)\s*[0-9][0-9,]*/i.test(output)) {
+    violations.push(...structuredPriceViolation('EvoCheck', EVOCHECK_COMMERCIAL_PRICING, output));
+  }
 
   return {
     safe: violations.length === 0,

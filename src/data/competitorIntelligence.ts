@@ -34,6 +34,35 @@ export interface MarketPriceObservation {
   notes?: string;
 }
 
+export type CommercialPriceType = 'RETAIL' | 'PATIENT' | 'PROMOTIONAL' | 'BUNDLE';
+export type CommercialPriceChannel = 'DISTRIBUTION' | 'ONLINE' | 'MARKETPLACE' | 'UNKNOWN';
+
+export interface CommercialPriceObservation {
+  market: 'Pakistan';
+  currency: 'PKR';
+  valuePKR: number;
+  priceType: CommercialPriceType;
+  channel: CommercialPriceChannel;
+  status: Extract<CompetitorFactStatus, 'VERIFIED' | 'USER_PROVIDED' | 'NEEDS_VERIFICATION'>;
+  source: string;
+  sourceUrl?: string;
+  observedAt: string;
+  notes?: string;
+}
+
+export const EVOCHECK_COMMERCIAL_PRICING: CommercialPriceObservation[] = [
+  {
+    market: 'Pakistan', currency: 'PKR', valuePKR: 12900, priceType: 'PATIENT', channel: 'DISTRIBUTION',
+    status: 'USER_PROVIDED', source: 'Current Pakistan commercial field intelligence', observedAt: '2026-09-08',
+    notes: 'Patient price via distribution; keep distinct from public online pricing.'
+  },
+  {
+    market: 'Pakistan', currency: 'PKR', valuePKR: 13600, priceType: 'PATIENT', channel: 'ONLINE',
+    status: 'USER_PROVIDED', source: 'Current Pakistan commercial field intelligence', observedAt: '2026-09-08',
+    notes: 'Patient price online; productKnowledge.ts remains the product-truth source for this value.'
+  }
+];
+
 export interface CompetitorIntelligenceRecord {
   productId: string;
   brandName: string;
@@ -52,6 +81,7 @@ export interface CompetitorIntelligenceRecord {
     alarmCapability: CompetitorFact<string | null>;
   };
   marketPriceObservations: MarketPriceObservation[];
+  commercialPrices: CommercialPriceObservation[];
   strengths: string[];
   weaknesses: string[];
   approvedComparisonFacts: string[];
@@ -154,6 +184,7 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
       }
     },
     marketPriceObservations: [],
+    commercialPrices: [],
     strengths: ['High global brand recognition', 'Established doctor familiarity'],
     weaknesses: [],
     approvedComparisonFacts: [
@@ -242,6 +273,7 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
       { market: 'Pakistan', currency: 'PKR', valuePKR: 17999, priceType: 'PROMOTIONAL', status: 'MARKET_OBSERVED', source: 'CGM Pakistan', sourceUrl: 'https://cgmpakistan.com/', observedAt: '2026-09-08' },
       { market: 'Pakistan', currency: 'PKR', valuePKR: 19500, priceType: 'RETAIL', status: 'MARKET_OBSERVED', source: 'CGM Shop Online Pakistan', sourceUrl: 'https://cgmshoponline.com/', observedAt: '2026-09-08' }
     ],
+    commercialPrices: [],
     strengths: ['Established Abbott ecosystem', 'Real-time readings and optional alarms', 'Strong global doctor familiarity'],
     weaknesses: [],
     approvedComparisonFacts: [
@@ -273,6 +305,18 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
       alarmCapability: { value: 'Customizable glucose alarms.', status: 'VERIFIED', source: 'SIBIONICS GS1 official product page', sourceUrl: SIBIONICS_GS1.product }
     },
     marketPriceObservations: [],
+    commercialPrices: [
+      {
+        market: 'Pakistan', currency: 'PKR', valuePKR: 14000, priceType: 'RETAIL', channel: 'UNKNOWN',
+        status: 'USER_PROVIDED', source: 'Current Pakistan commercial field intelligence', observedAt: '2026-09-08',
+        notes: 'Current SIBIONICS GS1 retail price.'
+      },
+      {
+        market: 'Pakistan', currency: 'PKR', valuePKR: 12600, priceType: 'PATIENT', channel: 'DISTRIBUTION',
+        status: 'USER_PROVIDED', source: 'Current Pakistan commercial field intelligence', observedAt: '2026-09-08',
+        notes: 'Patient price via distribution.'
+      }
+    ],
     strengths: ['14-day continuous monitoring', 'Bluetooth-based ongoing readings after activation', 'IP28 water resistance'],
     weaknesses: ['14-day wear lifecycle compared with EvoCheck 15 days'],
     approvedComparisonFacts: [
@@ -307,6 +351,7 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
       { market: 'Pakistan', currency: 'PKR', valuePKR: 11500, priceType: 'PROMOTIONAL', status: 'MARKET_OBSERVED', source: 'CGM Pakistan', sourceUrl: ICAN_I3.pakistanAlt, observedAt: '2026-09-08' },
       { market: 'Pakistan', currency: 'PKR', valuePKR: 12500, priceType: 'PROMOTIONAL', status: 'MARKET_OBSERVED', source: 'CGM Shop Online Pakistan', sourceUrl: 'https://cgmshoponline.com/', observedAt: '2026-09-08' }
     ],
+    commercialPrices: [],
     strengths: ['15-day wear', '8.71% adult MARD', 'Scan-free real-time monitoring', 'IP28 water resistance'],
     weaknesses: [],
     approvedComparisonFacts: [
