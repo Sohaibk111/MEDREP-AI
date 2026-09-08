@@ -52,7 +52,8 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
     priorityCallOfTheMoment,
     todayVisitsQueue,
     urgentTasks,
-    topTerritoryOpportunities
+    topTerritoryOpportunities,
+    operationalMetrics
   } = briefingData;
 
   const {
@@ -85,6 +86,11 @@ export const MorningBriefingView: React.FC<MorningBriefingViewProps> = ({
           <p className="text-xs text-[#64748b] mt-0.5">
             Optimized route cluster: <strong>PWD ➔ Soan Garden ➔ Shifa International</strong>
           </p>
+          {operationalMetrics && (
+            <p className="text-xs text-[#475569] mt-2 font-medium">
+              v1.2 operations: <strong>{operationalMetrics.samplesOnHand}</strong> sample units on hand • <strong>{operationalMetrics.monthlyAchieved}/{operationalMetrics.monthlyTarget}</strong> monthly units ({operationalMetrics.monthlyPacingPercent}% pacing) • <strong>{operationalMetrics.championsCount}</strong> champions
+            </p>
+          )}
         </div>
 
         {/* Quick Actions CTAs */}

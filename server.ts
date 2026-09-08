@@ -31,7 +31,13 @@ import {
   VisitOutcomeType,
   VisitOutcomeRecord,
   DayEndSummaryReport,
-  PrescriberJourneyState
+  PrescriberJourneyState,
+  SampleInventoryItem,
+  SampleTransaction,
+  MonthlyTarget,
+  LifecycleHistoryRecord,
+  PrescriberLifecycleStatus,
+  DoctorTimelineEvent
 } from './src/types';
 import { OBJECTION_SCENARIOS, getScenarioById } from './src/data/objectionScenarios';
 import { evaluateObjectionDrill } from './src/services/objectionEvaluator';
@@ -58,7 +64,16 @@ interface CRMStore {
   dataConflicts: DataConflict[];
   outcomes?: VisitOutcomeRecord[];
   dayEndSummaries?: DayEndSummaryReport[];
+  sampleInventory?: SampleInventoryItem[];
+  sampleTransactions?: SampleTransaction[];
+  monthlyTargets?: MonthlyTarget[];
+  lifecycleHistory?: LifecycleHistoryRecord[];
 }
+
+const DEFAULT_SAMPLE_INVENTORY: SampleInventoryItem[] = [{
+  productId: 'evocheck-demo-kit', productName: 'EvoCheck CGM Demo Kit', openingBalance: 100,
+  quantityOnHand: 100, reorderLevel: 15, updatedAt: '2026-09-01T00:00:00.000Z'
+}];
 
 function loadDurableStore(): CRMStore {
   try {
@@ -71,6 +86,12 @@ function loadDurableStore(): CRMStore {
       if (parsed && Array.isArray(parsed.doctors) && Array.isArray(parsed.visits)) {
         if (!Array.isArray(parsed.outcomes)) parsed.outcomes = [];
         if (!Array.isArray(parsed.dayEndSummaries)) parsed.dayEndSummaries = [];
+        // v1.2 fields are additive.  Do not rewrite the established CRM seed merely
+        // because it predates these fields.
+        if (!Array.isArray(parsed.sampleInventory)) parsed.sampleInventory = JSON.parse(JSON.stringify(DEFAULT_SAMPLE_INVENTORY));
+        if (!Array.isArray(parsed.sampleTransactions)) parsed.sampleTransactions = [];
+        if (!Array.isArray(parsed.monthlyTargets)) parsed.monthlyTargets = [];
+        if (!Array.isArray(parsed.lifecycleHistory)) parsed.lifecycleHistory = [];
         return parsed;
       }
     }
@@ -85,7 +106,11 @@ function loadDurableStore(): CRMStore {
     fieldPlan: JSON.parse(JSON.stringify(INITIAL_FIELD_PLAN)),
     dataConflicts: JSON.parse(JSON.stringify(INITIAL_DATA_CONFLICTS)),
     outcomes: [],
-    dayEndSummaries: []
+    dayEndSummaries: [],
+    sampleInventory: JSON.parse(JSON.stringify(DEFAULT_SAMPLE_INVENTORY)),
+    sampleTransactions: [],
+    monthlyTargets: [],
+    lifecycleHistory: []
   };
 }
 
@@ -98,6 +123,10 @@ let fieldPlan: WeeklyFieldPlan = store.fieldPlan;
 let dataConflicts: DataConflict[] = store.dataConflicts;
 let outcomes: VisitOutcomeRecord[] = store.outcomes || [];
 let dayEndSummaries: DayEndSummaryReport[] = store.dayEndSummaries || [];
+let sampleInventory: SampleInventoryItem[] = store.sampleInventory || JSON.parse(JSON.stringify(DEFAULT_SAMPLE_INVENTORY));
+let sampleTransactions: SampleTransaction[] = store.sampleTransactions || [];
+let monthlyTargets: MonthlyTarget[] = store.monthlyTargets || [];
+let lifecycleHistory: LifecycleHistoryRecord[] = store.lifecycleHistory || [];
 
 function reloadDurableStoreFromDisk() {
   const reloaded = loadDurableStore();
@@ -109,6 +138,10 @@ function reloadDurableStoreFromDisk() {
   dataConflicts = reloaded.dataConflicts;
   outcomes = reloaded.outcomes || [];
   dayEndSummaries = reloaded.dayEndSummaries || [];
+  sampleInventory = reloaded.sampleInventory || JSON.parse(JSON.stringify(DEFAULT_SAMPLE_INVENTORY));
+  sampleTransactions = reloaded.sampleTransactions || [];
+  monthlyTargets = reloaded.monthlyTargets || [];
+  lifecycleHistory = reloaded.lifecycleHistory || [];
 }
 
 function saveDurableStore() {
@@ -124,7 +157,11 @@ function saveDurableStore() {
       fieldPlan,
       dataConflicts,
       outcomes,
-      dayEndSummaries
+      dayEndSummaries,
+      sampleInventory,
+      sampleTransactions,
+      monthlyTargets,
+      lifecycleHistory
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2), 'utf-8');
   } catch (err) {
@@ -146,6 +183,35 @@ function getAIClient(): GoogleGenAI | null {
     aiClient = new GoogleGenAI({ apiKey });
   }
   return aiClient;
+}
+
+function isValidMonth(month: unknown): month is string {
+  return typeof month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
+}
+
+function lifecycleForDoctor(doc: Doctor): PrescriberLifecycleStatus {
+  if (doc.prescriberStatus === 'dormant') return 'DORMANT';
+  if (doc.prescriberStatus === 'advocate' && doc.relationshipStrength >= 4) return 'CHAMPION';
+  if (doc.prescriberStatus === 'active_prescriber') return 'ADOPTER';
+  if (doc.prescriberStatus === 'trialing') return 'TRIAL';
+  return doc.totalVisitsCount > 0 ? 'ENGAGED' : 'PROSPECT';
+}
+
+function recordLifecycleChange(doc: Doctor, status: PrescriberLifecycleStatus, reason: string, source: LifecycleHistoryRecord['source']) {
+  const previousStatus = lifecycleHistory.find(entry => entry.doctorId === doc.id)?.status || lifecycleForDoctor(doc);
+  if (previousStatus === status && source === 'AUTOMATIC') return;
+  lifecycleHistory.unshift({ id: `life-${Date.now()}-${lifecycleHistory.length}`, doctorId: doc.id, previousStatus, status, reason, source, recordedAt: new Date().toISOString() });
+}
+
+function prescriberStatusForLifecycle(status: PrescriberLifecycleStatus): Doctor['prescriberStatus'] {
+  const mapping: Record<PrescriberLifecycleStatus, Doctor['prescriberStatus']> = {
+    PROSPECT: 'prospect', ENGAGED: 'prospect', TRIAL: 'trialing', ADOPTER: 'active_prescriber', CHAMPION: 'advocate', DORMANT: 'dormant'
+  };
+  return mapping[status];
+}
+
+function getMonthlyTarget(month: string): MonthlyTarget {
+  return monthlyTargets.find(target => target.month === month) || { month, targetUnits: 0, achievedUnits: 0, updatedAt: new Date().toISOString() };
 }
 
 async function startServer() {
@@ -225,8 +291,11 @@ async function startServer() {
       completedVisits: completedVisits.length,
       plannedVisitsToday: todaysVisits.length,
       activePatientOpportunities: patientOpportunities.length,
-      verifiedDoctorsCount: doctors.length
+      verifiedDoctorsCount: doctors.length,
+      sampleUnitsOnHand: sampleInventory.reduce((total, item) => total + item.quantityOnHand, 0),
+      championsCount: doctors.filter(doc => lifecycleForDoctor(doc) === 'CHAMPION').length
     };
+    const monthlyTarget = getMonthlyTarget(today.slice(0, 7));
 
     res.json({
       success: true,
@@ -248,6 +317,14 @@ async function startServer() {
           competitorsTracked: COMPETITOR_COMPARISONS.length
         },
         stats,
+        operationalMetrics: {
+          samplesOnHand: stats.sampleUnitsOnHand,
+          samplesIssuedToday: sampleTransactions.filter(item => item.recordedAt.startsWith(today)).reduce((total, item) => total + item.quantity, 0),
+          monthlyTarget: monthlyTarget.targetUnits,
+          monthlyAchieved: monthlyTarget.achievedUnits,
+          monthlyPacingPercent: monthlyTarget.targetUnits ? Math.round((monthlyTarget.achievedUnits / monthlyTarget.targetUnits) * 100) : 0,
+          championsCount: stats.championsCount
+        },
         priorityCallOfTheMoment,
         todayVisitsQueue,
         urgentTasks,
@@ -483,6 +560,14 @@ async function startServer() {
         error: `Invalid outcomeType. Must be one of: ${VALID_OUTCOME_TYPES.join(', ')}`
       });
     }
+    if ((samplesCount !== undefined && (!Number.isInteger(samplesCount) || samplesCount < 0)) ||
+        (committedUnits !== undefined && (!Number.isInteger(committedUnits) || committedUnits < 0))) {
+      return res.status(400).json({ success: false, error: 'samplesCount and committedUnits must be non-negative integers' });
+    }
+    // Preserve the established v1.1 defaults while ensuring the ledger and target
+    // always use the exact same quantities exposed in the outcome record.
+    const effectiveSamplesCount = samplesCount ?? (outcomeType === 'SAMPLE_PROVIDED' ? 1 : 0);
+    const effectiveCommittedUnits = committedUnits ?? (outcomeType === 'CONVERTED' ? 1 : 0);
 
     // Update Visit state
     visit.status = 'completed';
@@ -522,16 +607,18 @@ async function startServer() {
         if (previousJourneyState === 'PROSPECTING') {
           doc.prescriberStatus = 'trialing';
         }
-      } else if (outcomeType === 'CONVERTED' || (committedUnits && committedUnits > 0)) {
+      } else if (outcomeType === 'CONVERTED' || effectiveCommittedUnits > 0) {
         doc.prescriberStatus = 'active_prescriber';
       }
 
       // If doctor has >= 3 completed visits and >= 5 committed units
       const completedCount = docVisits.filter(v => v.status === 'completed').length;
-      const totalUnits = docOpps.reduce((acc, curr) => acc + (curr.units || 1), 0) + (committedUnits || 0);
+      const totalUnits = docOpps.reduce((acc, curr) => acc + (curr.units || 1), 0) + effectiveCommittedUnits;
 
       if (completedCount >= 3 && totalUnits >= 5) {
-        doc.prescriberStatus = 'advocate';
+        // A champion is a trusted relationship, not only a volume threshold.
+        // Keep qualifying low-strength relationships as active prescribers.
+        doc.prescriberStatus = doc.relationshipStrength >= 4 ? 'advocate' : 'active_prescriber';
       }
 
       if (outcomeType === 'PRICE_OBJECTION' || outcomeType === 'CLINICAL_OBJECTION' || outcomeType === 'COMPETITOR_PREFERENCE') {
@@ -544,6 +631,25 @@ async function startServer() {
 
       updatedJourneyState = getPrescriberJourneyStage(doc, docVisits, docOpps);
       nextActionRecommendation = getPrescriberJourneyActionRecommendation(updatedJourneyState);
+      recordLifecycleChange(doc, lifecycleForDoctor(doc), `Outcome recorded: ${outcomeType}`, 'AUTOMATIC');
+    }
+
+    if (effectiveSamplesCount > 0) {
+      const inventory = sampleInventory.find(item => item.productId === 'evocheck-demo-kit');
+      if (!inventory || inventory.quantityOnHand < effectiveSamplesCount) {
+        return res.status(409).json({ success: false, error: 'Insufficient sample inventory for this outcome' });
+      }
+      inventory.quantityOnHand -= effectiveSamplesCount;
+      inventory.updatedAt = new Date().toISOString();
+      sampleTransactions.unshift({ id: `sample-${Date.now()}`, productId: inventory.productId, doctorId: visit.doctorId, visitId: visit.id, quantity: effectiveSamplesCount, transactionType: 'ISSUED', recordedAt: inventory.updatedAt, notes });
+    }
+
+    if (effectiveCommittedUnits > 0) {
+      const month = (visit.scheduledDate || getOperationalDateISO()).slice(0, 7);
+      const target = getMonthlyTarget(month);
+      const persisted = monthlyTargets.findIndex(item => item.month === month);
+      const updated = { ...target, achievedUnits: target.achievedUnits + effectiveCommittedUnits, updatedAt: new Date().toISOString() };
+      if (persisted >= 0) monthlyTargets[persisted] = updated; else monthlyTargets.push(updated);
     }
 
     // If follow-up date provided, schedule a follow-up task
@@ -570,8 +676,8 @@ async function startServer() {
       outcomeType,
       timestamp: new Date().toISOString(),
       notes,
-      samplesCount: samplesCount || (outcomeType === 'SAMPLE_PROVIDED' ? 1 : 0),
-      committedUnits: committedUnits || (outcomeType === 'CONVERTED' ? 1 : 0),
+      samplesCount: effectiveSamplesCount,
+      committedUnits: effectiveCommittedUnits,
       nextActionRecommendation,
       previousJourneyState,
       updatedJourneyState,
@@ -589,6 +695,76 @@ async function startServer() {
         outcomeRecord
       }
     });
+  });
+
+  // 3c. v1.2 Sample Inventory, Quota Pacing, Lifecycle, and Timeline APIs
+  app.get('/api/v1/samples/inventory', (_req: Request, res: Response) => {
+    res.json({ success: true, data: sampleInventory, transactions: sampleTransactions });
+  });
+
+  app.post('/api/v1/samples/transactions', (req: Request, res: Response) => {
+    const { productId = 'evocheck-demo-kit', doctorId, visitId, quantity, notes } = req.body;
+    if (!doctorId || !doctors.some(doc => doc.id === doctorId)) return res.status(400).json({ success: false, error: 'A valid doctorId is required' });
+    if (!Number.isInteger(quantity) || quantity <= 0) return res.status(400).json({ success: false, error: 'quantity must be a positive integer' });
+    const inventory = sampleInventory.find(item => item.productId === productId);
+    if (!inventory) return res.status(404).json({ success: false, error: 'Sample inventory item not found' });
+    if (inventory.quantityOnHand < quantity) return res.status(409).json({ success: false, error: 'Insufficient sample inventory' });
+    inventory.quantityOnHand -= quantity;
+    inventory.updatedAt = new Date().toISOString();
+    const transaction: SampleTransaction = { id: `sample-${Date.now()}`, productId, doctorId, visitId, quantity, transactionType: 'ISSUED', recordedAt: inventory.updatedAt, notes };
+    sampleTransactions.unshift(transaction);
+    saveDurableStore();
+    res.status(201).json({ success: true, data: { transaction, inventory } });
+  });
+
+  app.get('/api/v1/targets/monthly', (req: Request, res: Response) => {
+    const month = isValidMonth(req.query.month) ? req.query.month : getOperationalDateISO().slice(0, 7);
+    const target = getMonthlyTarget(month);
+    res.json({ success: true, data: { ...target, remainingUnits: Math.max(0, target.targetUnits - target.achievedUnits), pacingPercent: target.targetUnits ? Math.round((target.achievedUnits / target.targetUnits) * 100) : 0 } });
+  });
+
+  app.put('/api/v1/targets/monthly/:month', (req: Request, res: Response) => {
+    const { month } = req.params;
+    const { targetUnits } = req.body;
+    if (!isValidMonth(month) || !Number.isInteger(targetUnits) || targetUnits < 0) return res.status(400).json({ success: false, error: 'month must be YYYY-MM and targetUnits must be a non-negative integer' });
+    const current = getMonthlyTarget(month);
+    const target = { ...current, targetUnits, updatedAt: new Date().toISOString() };
+    const index = monthlyTargets.findIndex(item => item.month === month);
+    if (index >= 0) monthlyTargets[index] = target; else monthlyTargets.push(target);
+    saveDurableStore();
+    res.json({ success: true, data: target });
+  });
+
+  app.get('/api/v1/doctors/:id/lifecycle', (req: Request, res: Response) => {
+    const doctor = doctors.find(doc => doc.id === req.params.id);
+    if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' });
+    res.json({ success: true, data: { doctorId: doctor.id, status: lifecycleForDoctor(doctor), history: lifecycleHistory.filter(item => item.doctorId === doctor.id) } });
+  });
+
+  app.post('/api/v1/doctors/:id/lifecycle/override', (req: Request, res: Response) => {
+    const doctor = doctors.find(doc => doc.id === req.params.id);
+    const { status, reason } = req.body;
+    const valid: PrescriberLifecycleStatus[] = ['PROSPECT', 'ENGAGED', 'TRIAL', 'ADOPTER', 'CHAMPION', 'DORMANT'];
+    if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' });
+    if (!status || !valid.includes(status)) return res.status(400).json({ success: false, error: 'A valid target lifecycle status is required' });
+    if (status === 'CHAMPION' && doctor.relationshipStrength < 4) return res.status(422).json({ success: false, error: 'Champion lifecycle status requires relationship strength >= 4' });
+    recordLifecycleChange(doctor, status, reason || 'Manual lifecycle override', 'MANUAL_OVERRIDE');
+    doctor.prescriberStatus = prescriberStatusForLifecycle(status);
+    saveDurableStore();
+    res.json({ success: true, data: { doctorId: doctor.id, status, history: lifecycleHistory.filter(item => item.doctorId === doctor.id) } });
+  });
+
+  app.get('/api/v1/doctors/:id/timeline', (req: Request, res: Response) => {
+    const doctor = doctors.find(doc => doc.id === req.params.id);
+    if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' });
+    const events: DoctorTimelineEvent[] = [
+      ...visits.filter(item => item.doctorId === doctor.id).map(item => ({ id: `visit-${item.id}`, type: 'VISIT' as const, occurredAt: `${item.scheduledDate}T00:00:00.000Z`, title: `Visit ${item.status}`, detail: item.summary, visitId: item.id })),
+      ...outcomes.filter(item => item.doctorId === doctor.id).map(item => ({ id: `outcome-${item.id}`, type: 'OUTCOME' as const, occurredAt: item.timestamp, title: item.outcomeType, detail: item.notes, visitId: item.visitId })),
+      ...sampleTransactions.filter(item => item.doctorId === doctor.id).map(item => ({ id: `sample-${item.id}`, type: 'SAMPLE' as const, occurredAt: item.recordedAt, title: `${item.quantity} sample unit${item.quantity === 1 ? '' : 's'} issued`, detail: item.notes, visitId: item.visitId })),
+      ...lifecycleHistory.filter(item => item.doctorId === doctor.id).map(item => ({ id: `lifecycle-${item.id}`, type: 'LIFECYCLE' as const, occurredAt: item.recordedAt, title: `${item.previousStatus} → ${item.status}`, detail: item.reason })),
+      ...patientOpportunities.filter(item => item.doctorId === doctor.id).map(item => ({ id: `opportunity-${item.id}`, type: 'OPPORTUNITY' as const, occurredAt: item.updatedAt || item.createdAt || new Date(0).toISOString(), title: `Patient opportunity: ${item.status}`, detail: item.clinicalProfile }))
+    ].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+    res.json({ success: true, data: events });
   });
 
   // 4. Follow-up Tasks

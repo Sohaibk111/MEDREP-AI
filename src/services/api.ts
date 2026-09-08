@@ -271,3 +271,33 @@ export async function getRoutePlan(date?: string): Promise<{ success: boolean; d
   if (!res.ok) throw new Error('Failed to calculate route plan');
   return res.json();
 }
+
+export async function fetchSampleInventory() {
+  const res = await fetch(`${API_BASE}/samples/inventory`);
+  if (!res.ok) throw new Error('Failed to fetch sample inventory');
+  return res.json();
+}
+
+export async function issueSamples(payload: { doctorId: string; quantity: number; productId?: string; visitId?: string; notes?: string }) {
+  const res = await fetch(`${API_BASE}/samples/transactions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to issue samples');
+  return res.json();
+}
+
+export async function fetchMonthlyTarget(month?: string) {
+  const res = await fetch(`${API_BASE}/targets/monthly${month ? `?month=${encodeURIComponent(month)}` : ''}`);
+  if (!res.ok) throw new Error('Failed to fetch monthly target');
+  return res.json();
+}
+
+export async function updateMonthlyTarget(month: string, targetUnits: number) {
+  const res = await fetch(`${API_BASE}/targets/monthly/${month}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetUnits }) });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to update monthly target');
+  return res.json();
+}
+
+export async function fetchDoctorTimeline(doctorId: string) {
+  const res = await fetch(`${API_BASE}/doctors/${doctorId}/timeline`);
+  if (!res.ok) throw new Error('Failed to fetch doctor timeline');
+  return res.json();
+}
