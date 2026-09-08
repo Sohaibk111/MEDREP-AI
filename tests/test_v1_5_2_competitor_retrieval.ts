@@ -6,40 +6,54 @@ import {
 } from '../src/services/competitorIntelligence';
 
 function run() {
-  const libre = retrieveCompetitors('Compare EvoCheck with Abbott FreeStyle Libre');
-  assert.equal(libre.matchedCompetitors.length, 1, 'Libre query resolves exactly one competitor');
-  assert.equal(libre.matchedCompetitors[0].productId, 'abbott-freestyle-libre');
-  assert.equal(libre.matchedCompetitors[0].facts.mardPercent.status, 'USER_PROVIDED');
+  const libre1 = retrieveCompetitors('Compare EvoCheck with Abbott FreeStyle Libre 1');
+  assert.equal(libre1.matchedCompetitors.length, 1, 'Libre 1 query resolves exactly one competitor');
+  assert.equal(libre1.matchedCompetitors[0].productId, 'abbott-freestyle-libre-1');
+  assert.equal(libre1.matchedCompetitors[0].facts.mardPercent.status, 'NEEDS_VERIFICATION');
+  assert.equal(libre1.matchedCompetitors[0].facts.waterResistance.value, 'IP27');
 
-  const sibionics = retrieveCompetitors('SIBIONICS CGM accuracy and wear duration');
+  const libre2 = retrieveCompetitors('Compare EvoCheck with Abbott FreeStyle Libre 2');
+  assert.equal(libre2.matchedCompetitors.length, 1, 'Libre 2 query resolves exactly one competitor');
+  assert.equal(libre2.matchedCompetitors[0].productId, 'abbott-freestyle-libre-2');
+  assert.equal(libre2.matchedCompetitors[0].facts.mardPercent.value, 9.2);
+  assert.equal(libre2.matchedCompetitors[0].facts.mardPercent.status, 'VERIFIED');
+
+  const sibionics = retrieveCompetitors('SIBIONICS GS1 accuracy and wear duration');
   assert.equal(sibionics.matchedCompetitors.length, 1, 'SIBIONICS query resolves exactly one competitor');
-  assert.equal(sibionics.matchedCompetitors[0].facts.wearDurationDays.value, 14);
+  assert.equal(sibionics.matchedCompetitors[0].productId, 'sibionics-gs1');
+  assert.equal(sibionics.matchedCompetitors[0].facts.mardPercent.value, 8.83);
+  assert.equal(sibionics.matchedCompetitors[0].facts.monitoringIntervalMinutes.value, 5);
 
-  const multi = retrieveCompetitors('Compare Abbott, SIBIONICS and iCan i3');
+  const ican = retrieveCompetitors('Compare iCan i3 pricing and accuracy');
+  assert.equal(ican.matchedCompetitors.length, 1, 'iCan query resolves exactly one competitor');
+  assert.equal(ican.matchedCompetitors[0].productId, 'ican-sinocare-ican-i3');
+  assert.equal(ican.matchedCompetitors[0].facts.pricePKR.status, 'MARKET_OBSERVED');
+
+  const multi = retrieveCompetitors('Compare Abbott FreeStyle Libre 1, Libre 2, SIBIONICS GS1 and iCan i3');
   assert.deepEqual(
     multi.matchedCompetitors.map(record => record.productId),
-    ['abbott-freestyle-libre', 'sibionics-cgm', 'ican-sinocare'],
+    ['abbott-freestyle-libre-1', 'abbott-freestyle-libre-2', 'sibionics-gs1', 'ican-sinocare-ican-i3'],
     'multi-competitor retrieval is deterministic'
   );
 
   const unknown = retrieveCompetitors('Dexcom G7');
   assert.equal(unknown.matchedCompetitors.length, 0, 'unknown competitor is not invented');
 
-  const grounding = buildCompetitorGroundingContext('Compare EvoCheck with Abbott FreeStyle Libre');
-  assert.deepEqual(grounding.matchedCompetitorIds, ['abbott-freestyle-libre']);
-  assert(grounding.context.includes('[USER_PROVIDED]'), 'grounding preserves provenance status');
+  const grounding = buildCompetitorGroundingContext('Compare EvoCheck with Abbott FreeStyle Libre 2');
+  assert.deepEqual(grounding.matchedCompetitorIds, ['abbott-freestyle-libre-2']);
+  assert(grounding.context.includes('[VERIFIED]'), 'grounding preserves verified provenance');
   assert(grounding.context.includes('Never invent a missing competitor specification.'), 'guardrail is present');
-  assert(grounding.context.includes('No unsupported claim of overall clinical superiority'), 'comparison guardrail is preserved');
+  assert(grounding.context.includes('Do not compare MARD values across different product generations'), 'generation/MARD guardrail is present');
 
   const unknownGrounding = buildCompetitorGroundingContext('Dexcom G7');
   assert(unknownGrounding.context.includes('No controlled competitor record matched the query.'));
   assert(unknownGrounding.context.includes('Do not invent competitor facts'));
 
-  const record = getCompetitorRecord('ican-sinocare');
+  const record = getCompetitorRecord('ican-sinocare-ican-i3');
   assert(record, 'direct competitor lookup works');
-  assert.equal(record?.facts.pricePKR.status, 'UNKNOWN');
+  assert.equal(record?.facts.pricePKR.status, 'MARKET_OBSERVED');
 
-  console.log('v1.5.2 competitor retrieval tests passed: 7/7');
+  console.log('v1.5.2 competitor retrieval tests passed: 8/8');
 }
 
 run();
