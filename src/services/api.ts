@@ -14,7 +14,7 @@ import {
   ObjectionDrillResponse,
   ObjectionScenarioDefinition,
   RoutePlanResponse,
-  PrescriberLifecycleStatus
+  PrescriberLifecycleStatus, DailyRoutePlan, DoctorPriorityAssessment, PreVisitIntelligence
 } from '../types';
 
 const API_BASE = '/api/v1';
@@ -271,6 +271,24 @@ export async function getRoutePlan(date?: string): Promise<{ success: boolean; d
   const query = date ? `?date=${encodeURIComponent(date)}` : '';
   const res = await fetch(`${API_BASE}/territory/route-plan${query}`);
   if (!res.ok) throw new Error('Failed to calculate route plan');
+  return res.json();
+}
+
+export async function fetchFieldIntelligence(date?: string): Promise<{ success: boolean; data: { candidates: DoctorPriorityAssessment[]; deferredCandidates: DoctorPriorityAssessment[] } }> {
+  const res = await fetch(`${API_BASE}/territory/field-intelligence${date ? `?date=${encodeURIComponent(date)}&includeIneligible=true` : '?includeIneligible=true'}`);
+  if (!res.ok) throw new Error('Failed to calculate field intelligence');
+  return res.json();
+}
+
+export async function fetchDailyRoutePlan(date?: string): Promise<{ success: boolean; data: DailyRoutePlan }> {
+  const res = await fetch(`${API_BASE}/territory/daily-route-plan${date ? `?date=${encodeURIComponent(date)}` : ''}`);
+  if (!res.ok) throw new Error('Failed to calculate daily route plan');
+  return res.json();
+}
+
+export async function fetchPreVisitIntelligence(doctorId: string, date?: string): Promise<{ success: boolean; data: PreVisitIntelligence }> {
+  const res = await fetch(`${API_BASE}/doctors/${doctorId}/pre-visit-intelligence${date ? `?date=${encodeURIComponent(date)}` : ''}`);
+  if (!res.ok) throw new Error('Failed to load pre-visit intelligence');
   return res.json();
 }
 
