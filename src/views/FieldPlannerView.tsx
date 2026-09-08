@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { 
+import {
   Calendar, 
   MapPin, 
   Clock, 
@@ -16,6 +16,7 @@ import {
   getPrescriberJourneyStage, 
   getPrescriberJourneyActionRecommendation 
 } from '../services/routeEngine';
+import { DailyIntelligencePanel } from '../components/DailyIntelligencePanel';
 
 interface FieldPlannerViewProps {
   plannerData: WeeklyFieldPlan | null;
@@ -39,6 +40,7 @@ export const FieldPlannerView: React.FC<FieldPlannerViewProps> = ({
   onUpdateVisitStatus
 }) => {
   const [selectedDay, setSelectedDay] = useState<'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday'>('monday');
+  const [planningMode, setPlanningMode] = useState<'weekly' | 'daily'>('weekly');
 
   if (!plannerData) {
     return (
@@ -99,6 +101,11 @@ export const FieldPlannerView: React.FC<FieldPlannerViewProps> = ({
           <span>Add Stop to Route</span>
         </button>
       </div>
+      <div className="flex gap-2">
+        <button onClick={() => setPlanningMode('weekly')} className={`px-3 py-1.5 text-xs font-bold rounded-lg ${planningMode === 'weekly' ? 'bg-slate-900 text-white' : 'bg-white border'}`}>Weekly Schedule</button>
+        <button onClick={() => setPlanningMode('daily')} className={`px-3 py-1.5 text-xs font-bold rounded-lg ${planningMode === 'daily' ? 'bg-slate-900 text-white' : 'bg-white border'}`}>Daily Intelligence</button>
+      </div>
+      {planningMode === 'daily' ? <DailyIntelligencePanel /> : <>
 
       {/* Day Selector Buttons */}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
@@ -312,7 +319,7 @@ export const FieldPlannerView: React.FC<FieldPlannerViewProps> = ({
             <span>Add Stop to Route</span>
           </button>
         </div>
-      )}
+      )}</>}
     </div>
   );
 };

@@ -48,6 +48,9 @@ import {
 } from './src/services/routeEngine';
 import { generateDayEndSummary } from './src/services/dayEndSummaryService';
 import { getOperationalDateISO, formatOperationalDate } from './src/utils/dateUtils';
+import { isValidISODate } from './src/utils/dateUtils';
+import { buildFieldIntelligence, buildPreVisitIntelligence } from './src/services/fieldIntelligenceService';
+import { buildDailyRoutePlan } from './src/services/dailyRouteService';
 
 dotenv.config();
 
@@ -240,6 +243,7 @@ async function startServer() {
   // 1. Dashboard Briefing
   app.get('/api/v1/briefing', (req: Request, res: Response) => {
     const today = getOperationalDateISO();
+    const fieldIntelligence = buildFieldIntelligence({ doctors, visits, followups, opportunities: patientOpportunities, outcomes, samples: sampleTransactions, targetDate: today });
     const todaysVisits = visits.filter(v => v.scheduledDate === today);
     const completedVisits = todaysVisits.filter(v => v.status === 'completed');
     const urgentFollowups = followups.filter(f => f.status === 'pending');
@@ -323,6 +327,12 @@ async function startServer() {
           monthlyAchieved: monthlyTarget.achievedUnits,
           monthlyPacingPercent: monthlyTarget.targetUnits ? Math.round((monthlyTarget.achievedUnits / monthlyTarget.targetUnits) * 100) : 0,
           championsCount: stats.championsCount
+        },
+        fieldIntelligence: {
+          topRecommendation: fieldIntelligence.candidates[0] || null,
+          dueTodayCount: followups.filter(task => task.status === 'pending' && task.dueDate === today).length,
+          overdueFollowupCount: followups.filter(task => task.status === 'pending' && task.dueDate < today).length,
+          routePlanAvailable: true
         },
         priorityCallOfTheMoment,
         todayVisitsQueue,
@@ -930,6 +940,37 @@ async function startServer() {
       targetDate
     );
     res.json({ success: true, data: routePlan });
+  });
+
+  // v1.3 read-only, explainable Field Intelligence APIs. These endpoints derive
+  // recommendations from CRM facts and never write visits, field plans, or scores.
+  const fieldIntelligenceDate = (value: unknown) => {
+    if (value === undefined) return getOperationalDateISO();
+    return typeof value === 'string' && isValidISODate(value) ? value : null;
+  };
+  app.get('/api/v1/territory/field-intelligence', (req: Request, res: Response) => {
+    const targetDate = fieldIntelligenceDate(req.query.date);
+    if (!targetDate) return res.status(400).json({ success: false, error: 'date must be a valid YYYY-MM-DD value' });
+    const limitRaw = req.query.limit === undefined ? 8 : Number(req.query.limit);
+    if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 20) return res.status(400).json({ success: false, error: 'limit must be an integer between 1 and 20' });
+    const data = buildFieldIntelligence({ doctors, visits, followups, opportunities: patientOpportunities, outcomes, samples: sampleTransactions, targetDate });
+    const includeIneligible = req.query.includeIneligible === 'true';
+    res.json({ success: true, data: { date: targetDate, candidates: data.candidates.slice(0, limitRaw), deferredCandidates: includeIneligible ? data.deferredCandidates : [], algorithmVersion: data.algorithmVersion, limitations: ['No verified geographic coordinates are available; area labels and calling windows only are used.'] } });
+  });
+  app.get('/api/v1/doctors/:id/pre-visit-intelligence', (req: Request, res: Response) => {
+    const doctor = doctors.find(doc => doc.id === req.params.id);
+    if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' });
+    const targetDate = fieldIntelligenceDate(req.query.date);
+    if (!targetDate) return res.status(400).json({ success: false, error: 'date must be a valid YYYY-MM-DD value' });
+    res.json({ success: true, data: buildPreVisitIntelligence(doctor, { doctors, visits, followups, opportunities: patientOpportunities, outcomes, samples: sampleTransactions, targetDate }) });
+  });
+  app.get('/api/v1/territory/daily-route-plan', (req: Request, res: Response) => {
+    const targetDate = fieldIntelligenceDate(req.query.date);
+    if (!targetDate) return res.status(400).json({ success: false, error: 'date must be a valid YYYY-MM-DD value' });
+    const maxStops = req.query.maxStops === undefined ? 8 : Number(req.query.maxStops);
+    if (!Number.isInteger(maxStops) || maxStops < 1 || maxStops > 12) return res.status(400).json({ success: false, error: 'maxStops must be an integer between 1 and 12' });
+    const plan = buildDailyRoutePlan({ doctors, visits, followups, opportunities: patientOpportunities, outcomes, samples: sampleTransactions, fieldPlan, targetDate, maxStops });
+    res.json({ success: true, data: plan });
   });
 
   // 7. Product Knowledge & Claims Hub (Source of Truth v1.2)

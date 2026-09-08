@@ -32,6 +32,7 @@ import {
   WeeklyFieldPlan, 
   DataConflict, 
   EvoCheckProductKnowledge 
+  , DoctorPriorityAssessment
 } from './types';
 import { 
   fetchBriefing, 
@@ -41,6 +42,7 @@ import {
   fetchFieldPlan, 
   fetchKnowledge, 
   fetchConflicts,
+  fetchFieldIntelligence,
   updateFollowup,
   updateVisitStatus,
   updatePatientOpportunity
@@ -59,6 +61,7 @@ export function App() {
   const [plannerData, setPlannerData] = useState<WeeklyFieldPlan | null>(null);
   const [knowledge, setKnowledge] = useState<EvoCheckProductKnowledge | null>(null);
   const [conflicts, setConflicts] = useState<DataConflict[]>([]);
+  const [intelligence, setIntelligence] = useState<Record<string, DoctorPriorityAssessment>>({});
   const [loading, setLoading] = useState<boolean>(true);
 
   // Active Modals & Selections
@@ -94,7 +97,7 @@ export function App() {
         salesRes, 
         plannerRes, 
         knowledgeRes, 
-        conflictsRes
+        conflictsRes, intelligenceRes
       ] = await Promise.all([
         fetchBriefing().catch(() => ({ success: false })),
         fetchDoctors().catch(() => ({ success: false, data: [] })),
@@ -102,7 +105,8 @@ export function App() {
         fetchSales().catch(() => ({ success: false, data: [] })),
         fetchFieldPlan().catch(() => ({ success: false, data: null })),
         fetchKnowledge().catch(() => ({ success: false, data: null })),
-        fetchConflicts().catch(() => ({ success: false, data: [] }))
+        fetchConflicts().catch(() => ({ success: false, data: [] })),
+        fetchFieldIntelligence().catch(() => ({ success: false, data: { candidates: [] } }))
       ]);
 
       if (briefingRes.success) setBriefingData(briefingRes.data);
@@ -117,6 +121,7 @@ export function App() {
       if (plannerRes.success) setPlannerData(plannerRes.data);
       if (knowledgeRes.success) setKnowledge(knowledgeRes.data);
       if (conflictsRes.success) setConflicts(conflictsRes.data);
+      if (intelligenceRes.success) setIntelligence(Object.fromEntries(intelligenceRes.data.candidates.map((item: DoctorPriorityAssessment) => [item.doctorId, item])));
     } catch (err) {
       console.error('Error loading MedRep data:', err);
     } finally {
@@ -245,6 +250,7 @@ export function App() {
               {activeTab === 'doctors' && (
                 <DoctorCRMView
                   doctors={doctors}
+                  intelligence={intelligence}
                   onOpenDoctorDetail={handleOpenDoctorDetail}
                   onOpenAICoach={handleOpenAICoach}
                   onOpenVoiceNote={handleOpenVoiceNote}

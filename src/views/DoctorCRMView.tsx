@@ -13,7 +13,7 @@ import {
   UserPlus,
   Mic
 } from 'lucide-react';
-import { Doctor } from '../types';
+import { Doctor, DoctorPriorityAssessment } from '../types';
 import { 
   getPrescriberJourneyStage, 
   getPrescriberJourneyActionRecommendation 
@@ -21,6 +21,7 @@ import {
 
 interface DoctorCRMViewProps {
   doctors: Doctor[];
+  intelligence?: Record<string, DoctorPriorityAssessment>;
   onOpenDoctorDetail: (doctor: Doctor) => void;
   onOpenAICoach: (doctor: Doctor) => void;
   onOpenVoiceNote: (doctor: Doctor) => void;
@@ -30,6 +31,7 @@ interface DoctorCRMViewProps {
 
 export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
   doctors,
+  intelligence = {},
   onOpenDoctorDetail,
   onOpenAICoach,
   onOpenVoiceNote,
@@ -146,6 +148,7 @@ export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
         {filteredDoctors.map((doc) => {
           const primaryPhone = doc.contacts?.find((c) => c.type === 'mobile' || c.type === 'whatsapp')?.value;
           const nextTiming = doc.timings[0];
+          const assessment = intelligence[doc.id];
 
           return (
             <div
@@ -208,6 +211,7 @@ export const DoctorCRMView: React.FC<DoctorCRMViewProps> = ({
                     </div>
                   );
                 })()}
+                {assessment && <div className="mt-2 p-2 bg-sky-50 border border-sky-100 rounded-lg text-[11px]"><strong>Field Intelligence {assessment.score}/100:</strong> {assessment.nextBestAction.objective}</div>}
 
                 {/* Hospital / Clinic Info */}
                 <div className="mt-2.5 space-y-1 text-xs text-[#334155]">

@@ -869,3 +869,80 @@ export interface DoctorTimelineEvent {
   detail?: string;
   visitId?: string;
 }
+
+// ==========================================
+// MEDREP AI v1.3 FIELD INTELLIGENCE (DERIVED)
+// ==========================================
+
+export type FieldIntelligenceReasonCode =
+  | 'SCHEDULED_VISIT' | 'IN_PROGRESS_VISIT' | 'OVERDUE_FOLLOW_UP' | 'FOLLOW_UP_DUE_TODAY'
+  | 'HIGH_PRIORITY_TIER' | 'HIGH_POTENTIAL' | 'HIGH_RELATIONSHIP_STRENGTH' | 'TRIAL_ACTIVE'
+  | 'ADOPTER_GROWTH_OPPORTUNITY' | 'OPEN_PATIENT_OPPORTUNITY' | 'RECENT_CONVERSION_SIGNAL'
+  | 'RECENT_OBJECTION' | 'NO_RECENT_INTERACTION' | 'CALLING_WINDOW_AVAILABLE'
+  | 'CALLING_WINDOW_UNVERIFIED' | 'NO_CALLING_WINDOW_TODAY' | 'DORMANT_REACTIVATION';
+
+export interface FieldIntelligenceEvidence {
+  code: FieldIntelligenceReasonCode;
+  label: string;
+  points: number;
+  source: 'DOCTOR' | 'VISIT' | 'OUTCOME' | 'FOLLOWUP' | 'OPPORTUNITY' | 'SAMPLE' | 'LIFECYCLE';
+  sourceIds: string[];
+  factual: true;
+}
+
+export type NextBestActionType = 'VISIT' | 'FOLLOW_UP' | 'TRIAL_FOLLOW_UP' | 'SAMPLE_FOLLOW_UP'
+  | 'CONVERSION_OPPORTUNITY' | 'OBJECTION_HANDLING' | 'RELATIONSHIP_DEVELOPMENT' | 'REACTIVATION' | 'NO_ACTION';
+
+export interface NextBestAction {
+  type: NextBestActionType;
+  objective: string;
+  timing: 'TODAY' | 'THIS_WEEK' | 'WHEN_WINDOW_AVAILABLE' | 'NO_ACTION';
+  reasonCodes: FieldIntelligenceReasonCode[];
+  evidence: FieldIntelligenceEvidence[];
+  linkedVisitId?: string;
+  linkedFollowupId?: string;
+  linkedOpportunityIds: string[];
+  linkedOutcomeId?: string;
+}
+
+export interface DoctorPriorityAssessment {
+  doctorId: string;
+  targetDate: string;
+  eligibility: 'ELIGIBLE' | 'SCHEDULED' | 'IN_PROGRESS' | 'INELIGIBLE';
+  ineligibilityReasons: FieldIntelligenceReasonCode[];
+  score: number;
+  rank?: number;
+  lifecycle: PrescriberLifecycleStatus;
+  journey: PrescriberJourneyState;
+  reasons: FieldIntelligenceEvidence[];
+  nextBestAction: NextBestAction;
+}
+
+export interface PreVisitIntelligence {
+  doctor: Pick<Doctor, 'id' | 'name' | 'specialty' | 'hospital' | 'clinic' | 'area' | 'priority' | 'potentialScore' | 'relationshipStrength' | 'prescriberStatus' | 'lastVisitedDate'>;
+  targetDate: string;
+  lifecycle: PrescriberLifecycleStatus;
+  journey: PrescriberJourneyState;
+  priority: DoctorPriorityAssessment;
+  currentCallingWindow?: Pick<DoctorTiming, 'locationName' | 'startTime' | 'endTime' | 'source'>;
+  lastInteraction?: DoctorTimelineEvent;
+  previousVisit?: Pick<Visit, 'id' | 'scheduledDate' | 'summary' | 'interestLevel' | 'outcomes' | 'objections' | 'nextFollowUpDate' | 'nextVisitObjective'>;
+  outstandingFollowups: FollowupTask[];
+  unresolvedObjections: VisitObjection[];
+  recentSamples: SampleTransaction[];
+  recentCommitments: VisitOutcomeRecord[];
+  openOpportunities: AnonymousPatientOpportunity[];
+  recommendedObjective: NextBestAction;
+  dataGaps: Array<'NO_VISIT_HISTORY' | 'NO_WINDOW_TODAY' | 'UNVERIFIED_WINDOW' | 'NO_OPEN_FOLLOWUP'>;
+}
+
+export interface DailyRoutePlan {
+  date: string;
+  method: 'SCHEDULE_AND_AREA_CLUSTERING';
+  geographyStatus: 'AREA_ONLY_NO_COORDINATES';
+  immutableScheduledStops: RouteStopIntelligence[];
+  recommendedStops: Array<DoctorPriorityAssessment & { routeSequence: number; areaClusterKey: string; callingWindow?: Pick<DoctorTiming, 'startTime' | 'endTime' | 'locationName'> }>;
+  deferredCandidates: DoctorPriorityAssessment[];
+  routeReasoning: string[];
+  limitations: string[];
+}
