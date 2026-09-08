@@ -31,23 +31,9 @@ function normalize(value: string): string {
 function aliasesFor(record: CompetitorIntelligenceRecord): string[] {
   switch (record.productId) {
     case 'abbott-freestyle-libre-1':
-      return [
-        'abbott freestyle libre 1',
-        'free style libre 1',
-        'freestyle libre 1',
-        'libre 1',
-        'original freestyle libre',
-        'freestyle libre 14 day',
-        'libre 14 day'
-      ];
+      return ['abbott', 'free style libre', 'freestyle libre', 'abbott freestyle libre 1', 'freestyle libre 1', 'libre 1', 'original freestyle libre', 'libre 14 day'];
     case 'abbott-freestyle-libre-2':
-      return [
-        'abbott freestyle libre 2',
-        'free style libre 2',
-        'freestyle libre 2',
-        'libre 2',
-        'fsl 2'
-      ];
+      return ['abbott', 'free style libre', 'freestyle libre', 'abbott freestyle libre 2', 'freestyle libre 2', 'libre 2', 'fsl 2'];
     case 'sibionics-gs1':
       return ['sibionics', 'sibionics cgm', 'sibionics gs1', 'gs1'];
     case 'ican-sinocare-ican-i3':
@@ -100,14 +86,11 @@ function formatFact(label: string, fact: CompetitorFact): string {
 function formatRecord(record: CompetitorIntelligenceRecord): string {
   const priceObservations = record.marketPriceObservations.length
     ? record.marketPriceObservations
-        .map(
-          observation =>
-            `PKR ${observation.valuePKR} (${observation.priceType}, observed ${observation.observedAt}, ${observation.source})`
-        )
+        .map(observation => `PKR ${observation.valuePKR} (${observation.priceType}, observed ${observation.observedAt}, ${observation.source})`)
         .join('; ')
     : 'No current Pakistan market price observation stored.';
 
-  const lines = [
+  return [
     `COMPETITOR: ${record.brandName}`,
     `Variant: ${record.variant}`,
     `Manufacturer: ${record.manufacturer}`,
@@ -126,8 +109,7 @@ function formatRecord(record: CompetitorIntelligenceRecord): string {
     `Weaknesses: ${record.weaknesses.length ? record.weaknesses.join('; ') : 'Not stored in controlled knowledge base.'}`,
     `Approved comparison facts: ${record.approvedComparisonFacts.length ? record.approvedComparisonFacts.join(' | ') : 'None.'}`,
     `Source notes: ${record.sourceNotes.join(' | ')}`
-  ];
-  return lines.join('\n');
+  ].join('\n');
 }
 
 export function buildCompetitorGroundingContext(query: string): CompetitorGroundingContext {
