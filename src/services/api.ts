@@ -13,7 +13,8 @@ import {
   ObjectionDrillRequest,
   ObjectionDrillResponse,
   ObjectionScenarioDefinition,
-  RoutePlanResponse
+  RoutePlanResponse,
+  PrescriberLifecycleStatus
 } from '../types';
 
 const API_BASE = '/api/v1';
@@ -219,6 +220,7 @@ export async function logVisitOutcome(visitId: string, payload: {
   committedUnits?: number;
   followUpDate?: string;
   doctorId?: string;
+  clientVisitId?: string;
 }): Promise<{ success: boolean; data: { visit: Visit; doctor: Doctor; outcomeRecord: VisitOutcomeRecord } }> {
   const res = await fetch(`${API_BASE}/visits/${visitId}/outcome`, {
     method: 'POST',
@@ -299,5 +301,21 @@ export async function updateMonthlyTarget(month: string, targetUnits: number) {
 export async function fetchDoctorTimeline(doctorId: string) {
   const res = await fetch(`${API_BASE}/doctors/${doctorId}/timeline`);
   if (!res.ok) throw new Error('Failed to fetch doctor timeline');
+  return res.json();
+}
+
+export async function fetchDoctorLifecycle(doctorId: string) {
+  const res = await fetch(`${API_BASE}/doctors/${doctorId}/lifecycle`);
+  if (!res.ok) throw new Error('Failed to fetch doctor lifecycle');
+  return res.json();
+}
+
+export async function overrideDoctorLifecycle(doctorId: string, status: PrescriberLifecycleStatus, reason?: string) {
+  const res = await fetch(`${API_BASE}/doctors/${doctorId}/lifecycle/override`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, reason })
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to override doctor lifecycle');
   return res.json();
 }

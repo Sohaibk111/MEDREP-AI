@@ -197,8 +197,7 @@ function lifecycleForDoctor(doc: Doctor): PrescriberLifecycleStatus {
   return doc.totalVisitsCount > 0 ? 'ENGAGED' : 'PROSPECT';
 }
 
-function recordLifecycleChange(doc: Doctor, status: PrescriberLifecycleStatus, reason: string, source: LifecycleHistoryRecord['source']) {
-  const previousStatus = lifecycleHistory.find(entry => entry.doctorId === doc.id)?.status || lifecycleForDoctor(doc);
+function recordLifecycleChange(doc: Doctor, previousStatus: PrescriberLifecycleStatus, status: PrescriberLifecycleStatus, reason: string, source: LifecycleHistoryRecord['source']) {
   if (previousStatus === status && source === 'AUTOMATIC') return;
   lifecycleHistory.unshift({ id: `life-${Date.now()}-${lifecycleHistory.length}`, doctorId: doc.id, previousStatus, status, reason, source, recordedAt: new Date().toISOString() });
 }
@@ -502,9 +501,10 @@ async function startServer() {
   // 3b. Visit Outcome Logging & Prescriber Progression (v1.1)
   app.post('/api/v1/visits/:id/outcome', (req: Request, res: Response) => {
     const { id } = req.params;
-    const { outcomeType, notes, samplesCount, committedUnits, followUpDate, doctorId: reqDoctorId } = req.body;
+    const { outcomeType, notes, samplesCount, committedUnits, followUpDate, doctorId: reqDoctorId, clientVisitId } = req.body;
 
     let visit = visits.find(v => v.id === id);
+    let isNewVisit = false;
     if (!visit) {
       // If visit does not exist, check if id represents or body supplies a valid doctor
       let targetDoctorId = reqDoctorId;
@@ -520,7 +520,8 @@ async function startServer() {
         return res.status(404).json({ success: false, error: 'Visit not found' });
       }
 
-      // Materialize legitimate visit record for this doctor
+      // Build a legitimate visit draft. It is not persisted until every outcome
+      // validation (including inventory) has succeeded.
       const opDate = getOperationalDateISO();
       visit = {
         id: (id && id !== 'undefined' && id !== 'null') ? id : `vis-${Date.now()}`,
@@ -537,7 +538,7 @@ async function startServer() {
         ],
         outcomes: []
       };
-      visits.push(visit);
+      isNewVisit = true;
     }
 
     const VALID_OUTCOME_TYPES: VisitOutcomeType[] = [
@@ -560,6 +561,23 @@ async function startServer() {
         error: `Invalid outcomeType. Must be one of: ${VALID_OUTCOME_TYPES.join(', ')}`
       });
     }
+    if (clientVisitId !== undefined && (typeof clientVisitId !== 'string' || !clientVisitId.trim() || clientVisitId.length > 200)) {
+      return res.status(400).json({ success: false, error: 'clientVisitId must be a non-empty string up to 200 characters' });
+    }
+    const normalizedClientVisitId = typeof clientVisitId === 'string' ? clientVisitId.trim() : undefined;
+    if (normalizedClientVisitId) {
+      const existingOutcome = outcomes.find(item => item.clientVisitId === normalizedClientVisitId);
+      if (existingOutcome) {
+        if (existingOutcome.visitId !== visit.id) {
+          return res.status(409).json({ success: false, error: 'clientVisitId is already associated with another visit' });
+        }
+        return res.status(200).json({
+          success: true,
+          data: { visit: visits.find(item => item.id === existingOutcome.visitId) || visit, doctor: doctors.find(item => item.id === existingOutcome.doctorId), outcomeRecord: existingOutcome },
+          idempotent: true
+        });
+      }
+    }
     if ((samplesCount !== undefined && (!Number.isInteger(samplesCount) || samplesCount < 0)) ||
         (committedUnits !== undefined && (!Number.isInteger(committedUnits) || committedUnits < 0))) {
       return res.status(400).json({ success: false, error: 'samplesCount and committedUnits must be non-negative integers' });
@@ -568,6 +586,17 @@ async function startServer() {
     // always use the exact same quantities exposed in the outcome record.
     const effectiveSamplesCount = samplesCount ?? (outcomeType === 'SAMPLE_PROVIDED' ? 1 : 0);
     const effectiveCommittedUnits = committedUnits ?? (outcomeType === 'CONVERTED' ? 1 : 0);
+
+    // This is the final failure-prone validation. Do not mutate a visit, doctor,
+    // lifecycle, target, or ledger until inventory has been confirmed.
+    const sampleInventoryItem = effectiveSamplesCount > 0
+      ? sampleInventory.find(item => item.productId === 'evocheck-demo-kit')
+      : undefined;
+    if (effectiveSamplesCount > 0 && (!sampleInventoryItem || sampleInventoryItem.quantityOnHand < effectiveSamplesCount)) {
+      return res.status(409).json({ success: false, error: 'Insufficient sample inventory for this outcome' });
+    }
+
+    if (isNewVisit) visits.push(visit);
 
     // Update Visit state
     visit.status = 'completed';
@@ -594,6 +623,7 @@ async function startServer() {
     let nextActionRecommendation = 'Schedule product introduction and identify primary objection.';
 
     if (doc) {
+      const previousLifecycleStatus = lifecycleForDoctor(doc);
       const docVisits = visits.filter(v => v.doctorId === doc.id);
       const docOpps = patientOpportunities.filter(o => o.doctorId === doc.id);
       previousJourneyState = getPrescriberJourneyStage(doc, docVisits, docOpps);
@@ -631,17 +661,14 @@ async function startServer() {
 
       updatedJourneyState = getPrescriberJourneyStage(doc, docVisits, docOpps);
       nextActionRecommendation = getPrescriberJourneyActionRecommendation(updatedJourneyState);
-      recordLifecycleChange(doc, lifecycleForDoctor(doc), `Outcome recorded: ${outcomeType}`, 'AUTOMATIC');
+      recordLifecycleChange(doc, previousLifecycleStatus, lifecycleForDoctor(doc), `Outcome recorded: ${outcomeType}`, 'AUTOMATIC');
     }
 
     if (effectiveSamplesCount > 0) {
-      const inventory = sampleInventory.find(item => item.productId === 'evocheck-demo-kit');
-      if (!inventory || inventory.quantityOnHand < effectiveSamplesCount) {
-        return res.status(409).json({ success: false, error: 'Insufficient sample inventory for this outcome' });
-      }
-      inventory.quantityOnHand -= effectiveSamplesCount;
-      inventory.updatedAt = new Date().toISOString();
-      sampleTransactions.unshift({ id: `sample-${Date.now()}`, productId: inventory.productId, doctorId: visit.doctorId, visitId: visit.id, quantity: effectiveSamplesCount, transactionType: 'ISSUED', recordedAt: inventory.updatedAt, notes });
+      // sampleInventoryItem was validated above, before any CRM mutation.
+      sampleInventoryItem!.quantityOnHand -= effectiveSamplesCount;
+      sampleInventoryItem!.updatedAt = new Date().toISOString();
+      sampleTransactions.unshift({ id: `sample-${Date.now()}`, productId: sampleInventoryItem!.productId, doctorId: visit.doctorId, visitId: visit.id, quantity: effectiveSamplesCount, transactionType: 'ISSUED', recordedAt: sampleInventoryItem!.updatedAt, notes });
     }
 
     if (effectiveCommittedUnits > 0) {
@@ -672,6 +699,7 @@ async function startServer() {
     const outcomeRecord: VisitOutcomeRecord = {
       id: `out-${Date.now()}`,
       visitId: visit.id,
+      clientVisitId: normalizedClientVisitId,
       doctorId: visit.doctorId,
       outcomeType,
       timestamp: new Date().toISOString(),
@@ -748,7 +776,8 @@ async function startServer() {
     if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' });
     if (!status || !valid.includes(status)) return res.status(400).json({ success: false, error: 'A valid target lifecycle status is required' });
     if (status === 'CHAMPION' && doctor.relationshipStrength < 4) return res.status(422).json({ success: false, error: 'Champion lifecycle status requires relationship strength >= 4' });
-    recordLifecycleChange(doctor, status, reason || 'Manual lifecycle override', 'MANUAL_OVERRIDE');
+    const previousStatus = lifecycleForDoctor(doctor);
+    recordLifecycleChange(doctor, previousStatus, status, reason || 'Manual lifecycle override', 'MANUAL_OVERRIDE');
     doctor.prescriberStatus = prescriberStatusForLifecycle(status);
     saveDurableStore();
     res.json({ success: true, data: { doctorId: doctor.id, status, history: lifecycleHistory.filter(item => item.doctorId === doctor.id) } });

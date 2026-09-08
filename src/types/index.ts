@@ -623,6 +623,8 @@ export type PrescriberJourneyState =
 export interface VisitOutcomeRecord {
   id: string;
   visitId: string;
+  /** Stable client submission key used to safely retry a field outcome. */
+  clientVisitId?: string;
   doctorId: string;
   outcomeType: VisitOutcomeType;
   timestamp: string;
