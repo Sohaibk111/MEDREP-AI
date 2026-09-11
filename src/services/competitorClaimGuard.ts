@@ -348,6 +348,23 @@ function requestedCompetitorRecords(query: string): CompetitorIntelligenceRecord
   return [];
 }
 
+// Known CGM brand names outside the controlled competitor knowledge base.
+// Used only to recognize that a query is *about* a competitor (so unsupported
+// competitor facts are correctly quarantined) without ever fabricating data
+// for these brands.
+const OTHER_KNOWN_COMPETITOR_BRANDS = /\b(dexcom|medtronic|guardian\s*connect|aidex|senseonics|eversense|glucomen|accu-?chek|freestyle\s*libre\s*3|libre\s*3)\b/i;
+
+/**
+ * Narrow, deterministic distinction between genuine competitor-intelligence
+ * queries and EvoCheck/product-commercial queries. This governs ONLY which
+ * curated fallback is used when the claim guard rejects a generated answer —
+ * it never affects whether a violation is detected in the first place.
+ */
+export function isLikelyCompetitorQuery(query: string): boolean {
+  if (requestedCompetitorRecords(query).length > 0) return true;
+  return OTHER_KNOWN_COMPETITOR_BRANDS.test(query) || /\bcompetitor\b/i.test(query);
+}
+
 function evoCheckFacts() {
   const core = EVOCHECK_MASTER_KNOWLEDGE.core_specifications;
   return {
