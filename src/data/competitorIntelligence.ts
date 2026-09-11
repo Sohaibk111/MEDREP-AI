@@ -196,7 +196,7 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
     ],
     sourceNotes: [
       'Primary Abbott sources support the technical facts.',
-      'Libre 1 MARD remains NEEDS_VERIFICATION because the reviewed literature is not a single generation-specific canonical value.',
+      'Libre 1 adult MARD is VERIFIED at 11.4% from the cited ISPAD 2024 consensus guideline, Table 2; keep it separate from Libre 2 9.2%.',
       'Legacy Pakistan price is USER_PROVIDED.'
     ]
   },
@@ -308,16 +308,8 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
     },
     marketPriceObservations: [],
     commercialPrices: [
-      {
-        market: 'Pakistan', currency: 'PKR', valuePKR: 14000, priceType: 'RETAIL', channel: 'UNKNOWN',
-        status: 'USER_PROVIDED', source: 'Current Pakistan commercial field intelligence', observedAt: '2026-09-08',
-        notes: 'Current SIBIONICS GS1 retail price.'
-      },
-      {
-        market: 'Pakistan', currency: 'PKR', valuePKR: 12600, priceType: 'PATIENT', channel: 'DISTRIBUTION',
-        status: 'USER_PROVIDED', source: 'Current Pakistan commercial field intelligence', observedAt: '2026-09-08',
-        notes: 'Patient price via distribution.'
-      }
+      { market: 'Pakistan', currency: 'PKR', valuePKR: 14000, priceType: 'RETAIL', channel: 'UNKNOWN', status: 'USER_PROVIDED', source: 'Current Pakistan commercial field intelligence', observedAt: '2026-09-08', notes: 'Current SIBIONICS GS1 retail price.' },
+      { market: 'Pakistan', currency: 'PKR', valuePKR: 12600, priceType: 'PATIENT', channel: 'DISTRIBUTION', status: 'USER_PROVIDED', source: 'Current Pakistan commercial field intelligence', observedAt: '2026-09-08', notes: 'Patient price via distribution.' }
     ],
     strengths: ['14-day continuous monitoring', 'Bluetooth-based ongoing readings after activation', 'IP28 water resistance'],
     weaknesses: ['14-day wear lifecycle compared with EvoCheck 15 days'],
@@ -326,10 +318,7 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
       'Initial activation requires a scan; ongoing readings are Bluetooth-based.',
       'Pakistan price remains UNKNOWN in the controlled market dataset.'
     ],
-    sourceNotes: [
-      'Technical specifications are sourced from SIBIONICS official product pages.',
-      'Pakistan-local pricing was not sufficiently verified; do not invent it.'
-    ]
+    sourceNotes: ['Technical specifications are sourced from SIBIONICS official product pages.', 'Pakistan-local pricing was not sufficiently verified; do not invent it.']
   },
   {
     productId: 'ican-sinocare-ican-i3',
@@ -361,10 +350,7 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
       'The official iCan page describes scan-free glucose readings.',
       'Current Pakistan price observations are approximately PKR 11,500–12,900 depending on seller/promotion.'
     ],
-    sourceNotes: [
-      'Technical specifications are sourced from Sinocare/iCan official product information.',
-      'Pakistan pricing is time-sensitive and must be reconfirmed before quoting.'
-    ]
+    sourceNotes: ['Technical specifications are sourced from Sinocare/iCan official product information.', 'Pakistan pricing is time-sensitive and must be reconfirmed before quoting.']
   }
 ];
 
