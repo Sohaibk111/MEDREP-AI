@@ -1,3 +1,6 @@
+import { buildCompetitorGroundingContext } from './src/services/competitorIntelligence';
+import { sanitizeCompetitorGeneratedText, isLikelyCompetitorQuery, CompetitorClaimGuardResult } from './src/services/competitorClaimGuard';
+import { buildDeterministicEvoCheckResponse } from './src/services/evoCheckDeterministicResponses';
 import { GEMINI_MODEL } from './src/config/ai';
 import express, { Request, Response } from 'express';
 import path from 'path';
@@ -1051,6 +1054,9 @@ async function startServer() {
 
     const ai = getAIClient();
     const verifiedKnowledgeContext = getVerifiedEvoCheckAIContext();
+    const competitorGrounding = buildCompetitorGroundingContext(
+      `${pastObjections} ${doc.notes || ''}`
+    );
 
     if (ai) {
       try {
@@ -1058,6 +1064,8 @@ async function startServer() {
 You are the elite AI Sales Coach for MedRep AI, assisting a field Product Specialist for EvoCheck Continuous Glucose Monitoring (CGM).
 
 ${verifiedKnowledgeContext}
+
+${competitorGrounding.context}
 
 Target Doctor:
 - Name: ${doc.name}
@@ -1076,6 +1084,11 @@ STRICT COMPLIANCE & PROVENANCE INSTRUCTIONS:
 4. If information is absent or not in the knowledge base, state: "This EvoCheck specification is not currently available in the verified MedRep AI knowledge base."
 5. Never infer an EvoCheck specification from a competitor. Never invent product claims.
 6. Tag facts as [FACT], inferences as [INFERENCE], and action advice as [RECOMMENDATION].
+7. For competitor-specific claims, use ONLY the controlled competitor intelligence above.
+8. Preserve [VERIFIED], [USER_PROVIDED], [NEEDS_VERIFICATION], and [UNKNOWN] provenance labels.
+9. Never invent missing competitor facts. If a competitor field is UNKNOWN, say it is unavailable in the current MedRep AI competitor knowledge base.
+10. Never infer NFC/scanning workflows, IP ratings, reader requirements, connectivity, prices, regulatory status, weaknesses, or superiority claims.
+11. Do not turn a single specification into overall clinical superiority.
 
 Return a JSON matching this exact structure:
 {
@@ -1421,6 +1434,21 @@ Extract and return strictly a valid JSON object matching:
     });
   });
 
+  // Architecture fix (v1.5.5): a claim-guard rejection for a query that is NOT
+  // actually about a competitor (e.g. EvoCheck's own pricing/discount
+  // governance) must fall back to the curated, controlled EvoCheck response —
+  // not the generic "no controlled competitor record matched" competitor
+  // fallback. Genuine competitor queries are untouched and continue to use
+  // the existing competitor claim guard fallback. Applies identically to both
+  // the successful-Gemini-generation path and the Gemini-unavailable
+  // deterministic-fallback path so neither can be silently overridden.
+  function guardWithEvoCheckFallback(query: string, rawResult: CompetitorClaimGuardResult): CompetitorClaimGuardResult {
+    if (!rawResult.safe && !isLikelyCompetitorQuery(query)) {
+      return { ...rawResult, safe: true, text: buildDeterministicEvoCheckResponse(query) };
+    }
+    return rawResult;
+  }
+
   // 12. AI Territory & Knowledge Chat Assistant
   app.post('/api/v1/ai/chat', async (req: Request, res: Response) => {
     const { query } = req.body;
@@ -1432,6 +1460,7 @@ Extract and return strictly a valid JSON object matching:
 
     const ai = getAIClient();
     const verifiedKnowledgeContext = getVerifiedEvoCheckAIContext();
+    const competitorGrounding = buildCompetitorGroundingContext(query);
 
     const crmContext = `
 MedRep AI CRM Context:
@@ -1465,6 +1494,16 @@ CRITICAL KNOWLEDGE & PRICING GUARDRAILS:
 
 ${crmContext}
 
+${competitorGrounding.context}
+
+COMPETITOR PROVENANCE & ANTI-HALLUCINATION RULES:
+1. Use only controlled competitor intelligence for competitor-specific claims.
+2. Preserve [VERIFIED], [USER_PROVIDED], [NEEDS_VERIFICATION], and [UNKNOWN] labels.
+3. Never invent missing competitor facts.
+4. Never infer NFC/scanning workflows, IP ratings, reader requirements, connectivity, prices, regulatory status, weaknesses, or superiority claims.
+5. If a field is UNKNOWN, say it is unavailable in the current MedRep AI competitor knowledge base.
+6. Do not turn a single specification into overall clinical superiority.
+
 User Question: "${query}"
 `;
 
@@ -1473,58 +1512,46 @@ User Question: "${query}"
           contents: prompt
         });
 
-        return res.json({ success: true, text: response.text });
+        const guardedRaw = sanitizeCompetitorGeneratedText(
+          query,
+          response.text || '',
+          competitorGrounding.matchedCompetitorIds
+        );
+        const guarded = guardWithEvoCheckFallback(query, guardedRaw);
+
+        return res.json({
+          success: true,
+          text: guarded.text,
+          competitorGuard: {
+            safe: guarded.safe,
+            violations: guarded.violations,
+            matchedCompetitorIds: guarded.matchedCompetitorIds
+          }
+        });
       } catch (err) {
         console.error('Gemini Chat error:', err);
       }
     }
 
     // Contextual fallback responder (Verified Grounding v1.3)
-    const qLower = (query || '').toLowerCase();
-    let text = '';
-    if (qLower.includes('unsupported') || qLower.includes('not verified') || qLower.includes('unknown spec')) {
-      text = `This EvoCheck specification is not currently available in the verified MedRep AI knowledge base.`;
-    } else if (qLower.includes('distributor') && (qLower.includes('price') || qLower.includes('cost') || qLower.includes('rate'))) {
-      text = `[FACT] The authorized internal distributor price is PKR 12,900 per EvoCheck Premium Linx sensor/unit (Classification: DISTRIBUTOR_PRICE, Visibility: INTERNAL).\n\n[RECOMMENDATION] Medical representatives must maintain this as internal commercial information and not quote it as the public patient retail price.`;
-    } else if ((qLower.includes('public') || qLower.includes('retail') || qLower.includes('patient') || qLower.includes('online')) && (qLower.includes('price') || qLower.includes('cost'))) {
-      text = `[FACT] The official patient/public online price is PKR 13,600 (current promotional sale, regular PKR 17,000 with 20% discount), based on the current MyPharmEvo listing.\n\n[RECOMMENDATION] Self-paying patients can be directed to the official MyPharmEvo website for direct home delivery.`;
-    } else if (qLower.includes('institutional') || qLower.includes('hospital price') || qLower.includes('tender') || (qLower.includes('hospital') && qLower.includes('price')) || qLower.includes('invent a price')) {
-      text = `[FACT] Institutional hospital/tender pricing is currently NOT_CONFIGURED in the verified knowledge base.\n\n[RECOMMENDATION] Do not quote retail e-commerce prices for hospital tender procurement or invent unverified pricing; confirm institutional rates once formal commercial authorization is released.`;
-    } else if (qLower.includes('discount') || qLower.includes('invent') || qLower.includes('margin')) {
-      text = `[FACT] MedRep AI strictly adheres to verified pricing governance. Internal distributor price is PKR 12,900; public retail price is PKR 13,600 on MyPharmEvo. Institutional/hospital pricing is NOT_CONFIGURED.\n\n[RECOMMENDATION] Unauthorized discounts or invented prices are strictly prohibited. Quote only authorized pricing tiers.`;
-    } else if (qLower.includes('12,500') || qLower.includes('old price') || qLower.includes('legacy price')) {
-      text = `[FACT] The legacy figure of PKR 12,500 is obsolete and quarantined. The authorized internal distributor price is PKR 12,900 per sensor/unit, and the official public retail price is PKR 13,600.\n\n[RECOMMENDATION] Always use the active verified commercial pricing.`;
-    } else if (qLower.includes('regulatory') || qLower.includes('drap') || qLower.includes('approved') || qLower.includes('approval')) {
-      text = `[FACT] EvoCheck Premium Linx CGM is DRAP Approved (DRAP Medical Device Registration Authority, Pakistan).\n\n[RECOMMENDATION] Present the DRAP regulatory registration details when meeting with hospital procurement committees and clinical department heads.`;
-    } else if (qLower.includes('clinically proven') || qLower.includes('clinical trial') || qLower.includes('guarantee')) {
-      text = `[FACT] EvoCheck CGM has a verified MARD specification of 8.66% across its 15-day sensor lifespan under technical validation protocols. Claims are based on Verified Product Specifications rather than unverified promotional promises.\n\n[RECOMMENDATION] Share technical dossier data rather than subjective promotional phrasing.`;
-    } else if (qLower.includes('hypoglycemia') || qLower.includes('prevent')) {
-      text = `[FACT] EvoCheck is a continuous glucose monitoring sensor providing real-time glucose telemetry every 1 minute with customizable high/low threshold alerts. It provides actionable trend data but does not directly replace medical therapy or independently prevent metabolic events.\n\n[RECOMMENDATION] Explain how real-time trend arrows and automated alerts empower proactive glycemic management.`;
-    } else if (qLower.includes('fingerstick') || qLower.includes('replace') || qLower.includes('calibration')) {
-      text = `[FACT] EvoCheck is factory-calibrated for continuous glucose monitoring without routine fingersticks. However, confirmatory fingerstick blood glucose testing may be required during rapid glucose fluctuations or if symptoms do not match sensor readings.\n\n[RECOMMENDATION] Emphasize zero-routine calibration while reinforcing standard clinical safety guidance.`;
-    } else if (qLower.includes('14 days') || qLower.includes('14-day') || qLower.includes('is evocheck 14')) {
-      text = `[FACT] No, EvoCheck provides 15 days of continuous sensor wear per applicator unit (14 days is an obsolete/competitor specification).\n\n[RECOMMENDATION] Highlight the 15-day continuous wear duration as providing extra monitoring continuity.`;
-    } else if (qLower.includes('ip28') || qLower.includes('is evocheck ip28')) {
-      text = `[FACT] No, EvoCheck is certified IP68 water resistance according to IEC 60529 standard (IP28 is an obsolete/prohibited specification).\n\n[RECOMMENDATION] Reassure clinicians and patients that IP68 provides robust water and sweat resistance for showering and daily activities.`;
-    } else if (qLower.includes('libre') || qLower.includes('compare') || qLower.includes('competitor') || qLower.includes('dexcom') || qLower.includes('aidex')) {
-      text = `[FACT] EvoCheck vs FreeStyle Libre 1: EvoCheck provides 15-day wear (vs Libre's 14 days), 8.66% MARD (vs Libre's 9.2%), direct continuous Bluetooth Low Energy telemetry every 1 minute without manual NFC scanning (vs Libre's manual NFC scan requirement), and IP68 water resistance (vs Libre's IP27).\n\n[RECOMMENDATION] Position EvoCheck's continuous automated telemetry and 15-day duration as key clinical differentiators for active patient monitoring.`;
-    } else if (qLower.includes('price') || qLower.includes('cost') || qLower.includes('pricing')) {
-      text = `[FACT] EvoCheck pricing structure: Internal Distributor Price is PKR 12,900 per sensor/unit (INTERNAL); Public Patient Online Price is PKR 13,600 (official MyPharmEvo promotional listing, regular PKR 17,000); Institutional Hospital Price is NOT_CONFIGURED.\n\n[RECOMMENDATION] Clearly distinguish internal trade pricing from public retail pricing when speaking with clinicians.`;
-    } else if (qLower.includes('pwd') || qLower.includes('soan')) {
-      text = `[FACT] In PWD & Soan Garden, you have Dr. Sarah Khan (Diabetologist, Priority A, Sugar & Metabolic Care Clinic, OPD Mon/Tue/Thu 11:30 AM) and Dr. Uzair Malik (Nephrologist, Priority B, Soan International Hospital, OPD Mon/Wed 2:00 PM).\n\n[RECOMMENDATION] Visit Dr. Sarah Khan first around 12:00 PM to review gestational diabetes trial (#P-102), then drive 8 minutes down Islamabad Expressway to see Dr. Uzair Malik at 2:00 PM.`;
-    } else if (qLower.includes('mard') || qLower.includes('accuracy')) {
-      text = `[FACT] EvoCheck CGM has a verified MARD of 8.66% across its 15-day sensor lifespan (Verified Product Specification).\n\n[RECOMMENDATION] Share the technical dossier with clinicians seeking clinical-grade accuracy validation.`;
-    } else if (qLower.includes('wear') || qLower.includes('duration') || qLower.includes('days') || qLower.includes('how long')) {
-      text = `[FACT] EvoCheck provides 15 days of continuous sensor wear per applicator.\n\n[RECOMMENDATION] Position the 15-day lifespan against 14-day market alternatives as providing an extra day of uninterrupted glycemic insights.`;
-    } else if (qLower.includes('water') || qLower.includes('swim') || qLower.includes('shower') || qLower.includes('resistance')) {
-      text = `[FACT] EvoCheck is rated IP68 for water ingress resistance according to IEC 60529 standards.\n\n[RECOMMENDATION] Reassure patients that normal showering and water exposure are supported during the 15-day wear.`;
-    } else if (qLower.includes('warranty')) {
-      text = `[FACT] EvoCheck includes a 12-day manufacturer replacement warranty (source: MyPharmEvo official listing), which is distinct from the 15-day continuous sensor wear lifespan.\n\n[RECOMMENDATION] Clarify warranty coverage terms for patients requiring product support.`;
-    } else {
-      text = `[FACT] Today's prioritized route covers Shifa International Hospital (Prof. Dr. Jamal Ahmed, 11:00 AM) and PWD (Dr. Sarah Khan, 12:30 PM).\n\n[RECOMMENDATION] Ensure you carry the EvoCheck demonstration applicator and verified 8.66% MARD technical one-pagers for both calls.`;
-    }
+    const text = buildDeterministicEvoCheckResponse(query);
 
-    res.json({ success: true, text });
+    const guardedFallbackRaw = sanitizeCompetitorGeneratedText(
+      query,
+      text,
+      competitorGrounding.matchedCompetitorIds
+    );
+    const guardedFallback = guardWithEvoCheckFallback(query, guardedFallbackRaw);
+
+    res.json({
+      success: true,
+      text: guardedFallback.text,
+      competitorGuard: {
+        safe: guardedFallback.safe,
+        violations: guardedFallback.violations,
+        matchedCompetitorIds: guardedFallback.matchedCompetitorIds
+      }
+    });
   });
 
   // 12b. AI Objection Scenarios & Drill Evaluator (v1.1)
