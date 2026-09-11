@@ -21,6 +21,7 @@ import {
   Info
 } from 'lucide-react';
 import { EVOCHECK_MASTER_KNOWLEDGE, EVOCHECK_MASTER_SOURCES } from '../data/productKnowledge';
+import { COMPETITOR_INTELLIGENCE } from '../data/competitorIntelligence';
 import { ProductClaim, CompetitorProduct, ProductSourceType } from '../types';
 
 interface KnowledgeHubViewProps {
@@ -37,7 +38,17 @@ export const KnowledgeHubView: React.FC<KnowledgeHubViewProps> = ({ knowledge })
 
   const verifiedClaims: ProductClaim[] = knowledge?.claims || kb.verified_claims;
   const quarantinedClaims: ProductClaim[] = knowledge?.quarantinedClaims || kb.quarantined_claims;
-  const competitorsList: CompetitorProduct[] = knowledge?.competitors || kb.competitors;
+  const competitorsList: CompetitorProduct[] = knowledge?.competitors || COMPETITOR_INTELLIGENCE.map((comp) => ({
+  brand_name: comp.brandName,
+  manufacturer: comp.manufacturer,
+  claimed_mard: comp.facts.mardPercent.value,
+  wear_duration_days: comp.facts.wearDurationDays.value,
+  water_resistance: comp.facts.waterResistance.value,
+  approved_comparison_facts: comp.approvedComparisonFacts,
+  weaknesses: comp.weaknesses,
+  source_reference: comp.sourceNotes.join(' '),
+  verification_status: comp.facts.mardPercent.status
+}));
   const objectionList = kb.objection_guidelines;
   const sourcesRegistry = kb.sources_registry || EVOCHECK_MASTER_SOURCES;
 
