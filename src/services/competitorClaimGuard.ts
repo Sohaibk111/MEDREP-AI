@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MedRep AI v1.5.3 — deterministic post-generation competitor claim guard.
  *
  * The guard validates generated competitor claims against the controlled
@@ -12,6 +12,7 @@ import {
   CompetitorIntelligenceRecord
 } from '../data/competitorIntelligence';
 import { EVOCHECK_COMMERCIAL_PRICING } from '../data/competitorIntelligence';
+import { EVOCHECK_MASTER_KNOWLEDGE } from '../data/productKnowledge';
 
 export interface CompetitorClaimGuardResult {
   safe: boolean;
@@ -166,12 +167,26 @@ function readerViolation(record: CompetitorIntelligenceRecord, text: string): st
 
 function mardViolation(record: CompetitorIntelligenceRecord, text: string): string | null {
   const fact = record.facts.mardPercent;
-  if (fact.value !== null && valueMentioned(text, fact.value)) {
+  const mardMentioned = /\bmard\b|\bmean absolute relative difference\b/i.test(text);
+
+  if (!mardMentioned) return null;
+
+  if (fact.value === null) {
+    return `${record.brandName}: MARD is ${fact.status} in the controlled knowledge base.`;
+  }
+
+  if (valueMentioned(text, fact.value)) {
     return unverifiedValueViolation(record, 'MARD', fact, text);
   }
 
-  if (fact.value === null && /\bmard\b|\bmean absolute relative difference\b/i.test(text)) {
-    return `${record.brandName}: MARD is ${fact.status} in the controlled knowledge base.`;
+  const percentageMatches = [...text.matchAll(/\b(\d+(?:\.\d+)?)\s*%/g)]
+    .map(match => Number(match[1]));
+
+  if (
+    percentageMatches.length &&
+    !percentageMatches.some(value => value === Number(fact.value))
+  ) {
+    return `${record.brandName}: generated MARD claim conflicts with controlled value ${fact.value}%.`;
   }
 
   return null;
@@ -312,11 +327,127 @@ export function buildSafeCompetitorFallback(query: string, matchedCompetitorIds:
   return `${lines.join('\n')}\n\n[RECOMMENDATION] Use only controlled competitor facts and preserve their provenance. Do not infer missing fields or overall clinical superiority from specification differences.`;
 }
 
+function queryMentionsRecord(query: string, record: CompetitorIntelligenceRecord): boolean {
+  const normalized = normalize(query);
+  const explicitAliases: Record<string, string[]> = {
+    'abbott-freestyle-libre-1': ['freestyle libre 1', 'free style libre 1', 'libre 1', 'original freestyle libre', 'libre 14 day'],
+    'abbott-freestyle-libre-2': ['freestyle libre 2', 'free style libre 2', 'libre 2', 'fsl 2'],
+    'sibionics-gs1': ['sibionics', 'sibionics gs1', 'sibionics cgm', 'gs1'],
+    'ican-sinocare-ican-i3': ['ican i3', 'sinocare ican i3', 'sinocare ican', 'sinocare', 'ican']
+  };
+  return (explicitAliases[record.productId] || []).some(alias => normalized.includes(normalize(alias))) ||
+    normalized.includes(normalize(record.productId));
+}
+
+function requestedCompetitorRecords(query: string): CompetitorIntelligenceRecord[] {
+  const explicit = COMPETITOR_INTELLIGENCE.filter(record => queryMentionsRecord(query, record));
+  if (explicit.length) return explicit;
+  if (/\babbott\b/i.test(query)) {
+    return COMPETITOR_INTELLIGENCE.filter(record => record.productId.startsWith('abbott-freestyle-libre-'));
+  }
+  return [];
+}
+
+function evoCheckFacts() {
+  const core = EVOCHECK_MASTER_KNOWLEDGE.core_specifications;
+  return {
+    wear: core.wear_duration.value,
+    mard: core.mard.value,
+    connectivity: core.connectivity.value,
+    water: core.water_resistance.value,
+    interval: core.reading_interval.value
+  };
+}
+
+function deterministicPriceResponse(query: string, records: CompetitorIntelligenceRecord[]): string | null {
+  if (!/\b(?:price|cost|how much|pkr|rs\.?|rupees?)\b/i.test(query)) return null;
+
+  const lines: string[] = [];
+  if (/\bevocheck\b/i.test(query)) {
+    const evoPrices = EVOCHECK_COMMERCIAL_PRICING.map(price => `${price.priceType.toLowerCase()} via ${price.channel.toLowerCase()}: PKR ${price.valuePKR.toLocaleString()}`);
+    lines.push(`[FACT] EvoCheck Premium Linx CGM â€” ${evoPrices.join('; ')}.`);
+  }
+
+  for (const record of records) {
+    if (record.commercialPrices.length) {
+      const prices = record.commercialPrices.map(price => `${price.priceType.toLowerCase()} via ${price.channel.toLowerCase()}: PKR ${price.valuePKR.toLocaleString()}`);
+      lines.push(`[FACT] ${record.brandName} â€” ${prices.join('; ')}.`);
+    } else if (record.facts.pricePKR.value !== null && record.facts.pricePKR.status !== 'UNKNOWN') {
+      lines.push(`[FACT] ${record.brandName} â€” Pakistan price: PKR ${record.facts.pricePKR.value.toLocaleString()} [${record.facts.pricePKR.status}].`);
+    } else {
+      lines.push(`[FACT] ${record.brandName} â€” current Pakistan price is not established in the controlled knowledge base.`);
+    }
+  }
+
+  if (!lines.length) return null;
+  return `${lines.join('\n')}\n\n[RECOMMENDATION] Prices are time-sensitive; preserve the stated price type and channel when quoting them.`;
+}
+
+function deterministicMardResponse(query: string, records: CompetitorIntelligenceRecord[]): string | null {
+  if (!/\bmard\b|\bmean absolute relative difference\b/i.test(query)) return null;
+  if (records.length !== 1) return null;
+  const record = records[0];
+  const fact = record.facts.mardPercent;
+  if (fact.value === null || fact.status !== 'VERIFIED') {
+    return `[FACT] ${record.brandName} MARD is not verified in the controlled knowledge base.`;
+  }
+  return `[FACT] ${record.brandName} adult MARD: ${fact.value}%. Source: ${fact.source || 'controlled product evidence'}.`;
+}
+
+function deterministicComparisonResponse(query: string, records: CompetitorIntelligenceRecord[]): string | null {
+  if (!/\b(?:compare|comparison|versus|vs\.?|difference|better than|different from)\b/i.test(query)) return null;
+  if (!/\bevocheck\b/i.test(query) || records.length !== 1) return null;
+
+  const evo = evoCheckFacts();
+  const competitor = records[0];
+  const c = competitor.facts;
+  const lines = [
+    `[FACT] EvoCheck Premium Linx CGM vs ${competitor.brandName}`,
+    `- Wear duration: EvoCheck ${evo.wear} days; ${competitor.brandName} ${c.wearDurationDays.value ?? 'not verified'} days.`,
+    `- MARD: EvoCheck ${evo.mard}%; ${competitor.brandName} ${c.mardPercent.value !== null ? `${c.mardPercent.value}%` : 'not verified'}.`,
+    `- Connectivity: EvoCheck ${evo.connectivity}; ${competitor.brandName} ${c.connectivity.value ?? 'not verified'}.`,
+    `- Water resistance: EvoCheck ${evo.water}; ${competitor.brandName} ${c.waterResistance.value ?? 'not verified'}.`,
+    `- Monitoring interval: EvoCheck ${evo.interval} minute; ${competitor.brandName} ${c.monitoringIntervalMinutes.value ?? 'not verified'} minutes.`
+  ];
+
+  if (competitor.productId === 'abbott-freestyle-libre-1') {
+    lines.push('- Scan workflow: Libre 1 requires scanning the sensor to obtain readings; EvoCheck uses continuous BLE connectivity.');
+  } else if (c.scanWorkflow.value) {
+    lines.push(`- Scan workflow: EvoCheck uses continuous BLE connectivity; ${competitor.brandName} ${c.scanWorkflow.value}`);
+  }
+
+  return `${lines.join('\n')}\n\n[RECOMMENDATION] Use these generation-specific specifications for technical comparison. Do not infer overall clinical superiority from specifications alone.`;
+}
+
+function deterministicCompetitorResponse(query: string): { text: string; matchedCompetitorIds: string[] } | null {
+  const records = requestedCompetitorRecords(query);
+  const comparison = deterministicComparisonResponse(query, records);
+  if (comparison) return { text: comparison, matchedCompetitorIds: records.map(record => record.productId) };
+
+  const mard = deterministicMardResponse(query, records);
+  if (mard) return { text: mard, matchedCompetitorIds: records.map(record => record.productId) };
+
+  const price = deterministicPriceResponse(query, records);
+  if (price) return { text: price, matchedCompetitorIds: records.map(record => record.productId) };
+
+  return null;
+}
+
 export function sanitizeCompetitorGeneratedText(
   query: string,
   generatedText: string,
   matchedCompetitorIds: string[]
 ): CompetitorClaimGuardResult {
+  const deterministic = deterministicCompetitorResponse(query);
+  if (deterministic) {
+    return {
+      safe: true,
+      text: deterministic.text,
+      violations: [],
+      matchedCompetitorIds: deterministic.matchedCompetitorIds
+    };
+  }
+
   const validation = validateCompetitorGeneratedText(generatedText);
   if (validation.safe) return validation;
 

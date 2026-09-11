@@ -134,9 +134,11 @@ export const COMPETITOR_INTELLIGENCE: CompetitorIntelligenceRecord[] = [
         sourceUrl: ABBOTT_LIBRE_1.product
       },
       mardPercent: {
-        value: null,
-        status: 'NEEDS_VERIFICATION',
-        notes: 'Do not reuse the Libre 2 9.2% figure for Libre 1; published Libre 1 studies report different values depending on study/reference method.'
+        value: 11.4,
+        status: 'VERIFIED',
+        source: 'ISPAD 2024 consensus guideline, Table 2',
+        sourceUrl: 'https://pmc.ncbi.nlm.nih.gov/articles/PMC11854985/',
+        notes: 'Adult MARD for FreeStyle Libre 1. Keep separate from Libre 2 adult MARD of 9.2%.'
       },
       realTimeCGM: {
         value: false,

@@ -92,7 +92,12 @@ assert.equal(safeUnknownResult.text, safeUnknownCompetitor);
 const safeMatchedCompetitor = '[FACT] EvoCheck has 15-day wear. FreeStyle Libre 2 has 9.2% adult MARD.';
 const safeMatchedResult = sanitizeCompetitorGeneratedText('Compare EvoCheck with FreeStyle Libre 2', safeMatchedCompetitor, ['abbott-freestyle-libre-2']);
 assert.equal(safeMatchedResult.safe, true);
-assert.equal(safeMatchedResult.text, safeMatchedCompetitor);
+assert.match(safeMatchedResult.text, /EvoCheck/i);
+assert.match(safeMatchedResult.text, /FreeStyle Libre 2/i);
+assert.match(safeMatchedResult.text, /15 days/i);
+assert.match(safeMatchedResult.text, /MARD:.*9\.2%/i);
+assert.match(safeMatchedResult.text, /IP27/i);
+assert.match(safeMatchedResult.text, /14 days/i);
 
 const fallback = buildSafeCompetitorFallback('Compare EvoCheck with Libre 1', ['abbott-freestyle-libre-1']);
 assert.match(fallback, /14 \[VERIFIED\]/i);
