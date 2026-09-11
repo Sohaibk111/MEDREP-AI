@@ -9,7 +9,8 @@ function run() {
   const libre1 = retrieveCompetitors('Compare EvoCheck with Abbott FreeStyle Libre 1');
   assert.equal(libre1.matchedCompetitors.length, 1, 'Libre 1 query resolves exactly one competitor');
   assert.equal(libre1.matchedCompetitors[0].productId, 'abbott-freestyle-libre-1');
-  assert.equal(libre1.matchedCompetitors[0].facts.mardPercent.status, 'NEEDS_VERIFICATION');
+  assert.equal(libre1.matchedCompetitors[0].facts.mardPercent.value, 11.4);
+  assert.equal(libre1.matchedCompetitors[0].facts.mardPercent.status, 'VERIFIED');
   assert.equal(libre1.matchedCompetitors[0].facts.waterResistance.value, 'IP27');
 
   const libre2 = retrieveCompetitors('Compare EvoCheck with Abbott FreeStyle Libre 2');
