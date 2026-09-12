@@ -20,6 +20,8 @@ import {
 } from './src/data/mockData';
 import {
   EVOCHECK_MASTER_KNOWLEDGE,
+  EVOCHECK_DISTRIBUTOR_PRICING,
+  EVOCHECK_PUBLIC_RETAIL_PRICING,
   getVerifiedEvoCheckAIContext,
   queryEvoCheckSpecification
 } from './src/data/productKnowledge';
@@ -41,7 +43,23 @@ import {
   MonthlyTarget,
   LifecycleHistoryRecord,
   PrescriberLifecycleStatus,
-  DoctorTimelineEvent
+  DoctorTimelineEvent,
+  PatientCRM,
+  PatientAcquisitionSource,
+  PatientCRMStatus,
+  LeadCRM,
+  LeadStatus,
+  FollowUpEntityType,
+  FollowUpStatus,
+  DoctorPatientReferral,
+  ReferralStatus,
+  OrderCRM,
+  OrderSource,
+  PaymentStatus,
+  OrderStatus,
+  SensorLifecycle,
+  SensorLifecycleStatus,
+  DoctorRelationshipStatus
 } from './src/types';
 import { OBJECTION_SCENARIOS, getScenarioById } from './src/data/objectionScenarios';
 import { evaluateObjectionDrill } from './src/services/objectionEvaluator';
@@ -75,6 +93,11 @@ interface CRMStore {
   sampleTransactions?: SampleTransaction[];
   monthlyTargets?: MonthlyTarget[];
   lifecycleHistory?: LifecycleHistoryRecord[];
+  patients?: PatientCRM[];
+  leads?: LeadCRM[];
+  referrals?: DoctorPatientReferral[];
+  orders?: OrderCRM[];
+  sensors?: SensorLifecycle[];
 }
 
 const DEFAULT_SAMPLE_INVENTORY: SampleInventoryItem[] = [{
@@ -99,6 +122,12 @@ function loadDurableStore(): CRMStore {
         if (!Array.isArray(parsed.sampleTransactions)) parsed.sampleTransactions = [];
         if (!Array.isArray(parsed.monthlyTargets)) parsed.monthlyTargets = [];
         if (!Array.isArray(parsed.lifecycleHistory)) parsed.lifecycleHistory = [];
+        // v1.6.1 CRM Foundation collections are additive and initialized safely
+        if (!Array.isArray(parsed.patients)) parsed.patients = [];
+        if (!Array.isArray(parsed.leads)) parsed.leads = [];
+        if (!Array.isArray(parsed.referrals)) parsed.referrals = [];
+        if (!Array.isArray(parsed.orders)) parsed.orders = [];
+        if (!Array.isArray(parsed.sensors)) parsed.sensors = [];
         return parsed;
       }
     }
@@ -117,7 +146,12 @@ function loadDurableStore(): CRMStore {
     sampleInventory: JSON.parse(JSON.stringify(DEFAULT_SAMPLE_INVENTORY)),
     sampleTransactions: [],
     monthlyTargets: [],
-    lifecycleHistory: []
+    lifecycleHistory: [],
+    patients: [],
+    leads: [],
+    referrals: [],
+    orders: [],
+    sensors: []
   };
 }
 
@@ -134,6 +168,11 @@ let sampleInventory: SampleInventoryItem[] = store.sampleInventory || JSON.parse
 let sampleTransactions: SampleTransaction[] = store.sampleTransactions || [];
 let monthlyTargets: MonthlyTarget[] = store.monthlyTargets || [];
 let lifecycleHistory: LifecycleHistoryRecord[] = store.lifecycleHistory || [];
+let patients: PatientCRM[] = store.patients || [];
+let leads: LeadCRM[] = store.leads || [];
+let referrals: DoctorPatientReferral[] = store.referrals || [];
+let orders: OrderCRM[] = store.orders || [];
+let sensors: SensorLifecycle[] = store.sensors || [];
 
 function reloadDurableStoreFromDisk() {
   const reloaded = loadDurableStore();
@@ -149,6 +188,11 @@ function reloadDurableStoreFromDisk() {
   sampleTransactions = reloaded.sampleTransactions || [];
   monthlyTargets = reloaded.monthlyTargets || [];
   lifecycleHistory = reloaded.lifecycleHistory || [];
+  patients = reloaded.patients || [];
+  leads = reloaded.leads || [];
+  referrals = reloaded.referrals || [];
+  orders = reloaded.orders || [];
+  sensors = reloaded.sensors || [];
 }
 
 function saveDurableStore() {
@@ -168,12 +212,35 @@ function saveDurableStore() {
       sampleInventory,
       sampleTransactions,
       monthlyTargets,
-      lifecycleHistory
+      lifecycleHistory,
+      patients,
+      leads,
+      referrals,
+      orders,
+      sensors
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to write persistent CRM store to disk:', err);
   }
+}
+
+// Controlled product specification helpers — grounded in verified knowledge base
+function getProductWearDurationDays(productNameOrId?: string): number {
+  if (!productNameOrId || productNameOrId.toLowerCase().includes('evocheck')) {
+    return (EVOCHECK_MASTER_KNOWLEDGE as any)?.core_specifications?.wear_duration?.value || 15;
+  }
+  return 15;
+}
+
+function calculateSensorDates(startDateISO: string, wearDurationDays: number): { expectedEndDate: string; renewalDate: string } {
+  const start = new Date(startDateISO);
+  const end = new Date(start.getTime() + wearDurationDays * 24 * 60 * 60 * 1000);
+  const expectedEndDate = end.toISOString().split('T')[0];
+  // Renewal due 1 day before expiration for uninterrupted glycemic monitoring
+  const renewal = new Date(end.getTime() - 1 * 24 * 60 * 60 * 1000);
+  const renewalDate = renewal.toISOString().split('T')[0];
+  return { expectedEndDate, renewalDate };
 }
 
 // Only initialize data file if it does not already exist on disk
@@ -348,8 +415,17 @@ async function startServer() {
 
   // 2. Doctor CRM
   app.get('/api/v1/doctors', (req: Request, res: Response) => {
-    const { search, area, priority, status } = req.query;
-    let list = [...doctors];
+    const { search, area, territory, city, priority, status, relationshipStatus } = req.query;
+    let list = doctors.map(d => ({
+      ...d,
+      doctorId: d.doctorId || d.id,
+      relationshipStatus: d.relationshipStatus || (
+        d.prescriberStatus === 'active_prescriber' ? 'ACTIVE_PRESCRIBER' :
+        d.prescriberStatus === 'advocate' ? 'ACTIVE_PRESCRIBER' :
+        d.prescriberStatus === 'trialing' ? 'TRIAL' :
+        d.prescriberStatus === 'dormant' ? 'DORMANT' : 'PROSPECT'
+      )
+    }));
 
     if (search && typeof search === 'string') {
       const q = search.toLowerCase();
@@ -357,11 +433,18 @@ async function startServer() {
         d.name.toLowerCase().includes(q) ||
         d.specialty.toLowerCase().includes(q) ||
         d.hospital.toLowerCase().includes(q) ||
-        d.area.toLowerCase().includes(q)
+        d.area.toLowerCase().includes(q) ||
+        (d.city && d.city.toLowerCase().includes(q))
       );
     }
     if (area && typeof area === 'string' && area !== 'all') {
       list = list.filter(d => d.area.toLowerCase() === area.toLowerCase());
+    }
+    if (territory && typeof territory === 'string' && territory !== 'all') {
+      list = list.filter(d => (d.territory && d.territory.toLowerCase() === territory.toLowerCase()) || d.area.toLowerCase() === territory.toLowerCase());
+    }
+    if (city && typeof city === 'string' && city !== 'all') {
+      list = list.filter(d => d.city && d.city.toLowerCase() === city.toLowerCase());
     }
     if (priority && typeof priority === 'string' && priority !== 'all') {
       list = list.filter(d => d.priority === priority);
@@ -369,27 +452,39 @@ async function startServer() {
     if (status && typeof status === 'string' && status !== 'all') {
       list = list.filter(d => d.prescriberStatus === status);
     }
+    if (relationshipStatus && typeof relationshipStatus === 'string' && relationshipStatus !== 'all') {
+      list = list.filter(d => d.relationshipStatus === relationshipStatus);
+    }
 
     res.json({ success: true, data: list, count: list.length });
   });
 
   app.get('/api/v1/doctors/:id', (req: Request, res: Response) => {
-    const doc = doctors.find(d => d.id === req.params.id);
+    const doc = doctors.find(d => d.id === req.params.id || d.doctorId === req.params.id);
     if (!doc) {
       return res.status(404).json({ success: false, error: 'Doctor not found' });
     }
     const docVisits = visits.filter(v => v.doctorId === doc.id);
-    const docFollowups = followups.filter(f => f.doctorId === doc.id);
+    const docFollowups = followups.filter(f => f.doctorId === doc.id || (f.entityType === 'DOCTOR' && f.entityId === doc.id));
     const docOpportunities = patientOpportunities.filter(o => o.doctorId === doc.id);
+    const docReferrals = referrals.filter(r => r.doctorId === doc.id || (doc.doctorId && r.doctorId === doc.doctorId));
     const conflicts = dataConflicts.filter(c => c.entityId === doc.id && c.status === 'unresolved');
 
     res.json({
       success: true,
       data: {
         ...doc,
+        doctorId: doc.doctorId || doc.id,
+        relationshipStatus: doc.relationshipStatus || (
+          doc.prescriberStatus === 'active_prescriber' ? 'ACTIVE_PRESCRIBER' :
+          doc.prescriberStatus === 'advocate' ? 'ACTIVE_PRESCRIBER' :
+          doc.prescriberStatus === 'trialing' ? 'TRIAL' :
+          doc.prescriberStatus === 'dormant' ? 'DORMANT' : 'PROSPECT'
+        ),
         visitsHistory: docVisits,
         pendingTasks: docFollowups,
         patientOpportunities: docOpportunities,
+        referrals: docReferrals,
         conflicts
       }
     });
@@ -397,17 +492,26 @@ async function startServer() {
 
   app.post('/api/v1/doctors', (req: Request, res: Response) => {
     const payload = req.body;
+    const now = new Date().toISOString();
+    const docId = payload.doctorId || payload.id || `doc-${Date.now()}`;
     const newDoc: Doctor = {
-      id: `doc-${Date.now()}`,
+      id: docId,
+      doctorId: docId,
       name: payload.name || 'New Doctor',
       specialty: payload.specialty || 'General Diabetology',
       hospital: payload.hospital || 'Private Clinic',
       clinic: payload.clinic || 'Consulting Room',
       area: payload.area || 'PWD',
+      territory: payload.territory || payload.area || 'PWD',
       city: payload.city || 'Rawalpindi',
       address: payload.address || '',
+      phone: payload.phone,
+      whatsapp: payload.whatsapp,
+      email: payload.email,
       priority: payload.priority || 'B',
       prescriberStatus: payload.prescriberStatus || 'prospect',
+      relationshipStatus: payload.relationshipStatus || 'PROSPECT',
+      preferredCallTime: payload.preferredCallTime,
       cgmPotential: payload.cgmPotential || 'medium',
       affordabilityTier: payload.affordabilityTier || 'middle',
       relationshipStrength: payload.relationshipStrength || 1,
@@ -421,23 +525,45 @@ async function startServer() {
       openPatientOpportunitiesCount: 0,
       notes: payload.notes,
       isVerified: payload.isVerified ?? true,
-      hasConflict: false
+      hasConflict: false,
+      createdAt: payload.createdAt || now,
+      updatedAt: now
     };
     doctors.unshift(newDoc);
     saveDurableStore();
     res.status(201).json({ success: true, data: newDoc });
   });
 
-  app.patch('/api/v1/doctors/:id', (req: Request, res: Response) => {
-    const idx = doctors.findIndex(d => d.id === req.params.id);
+  app.put('/api/v1/doctors/:id', (req: Request, res: Response) => {
+    const idx = doctors.findIndex(d => d.id === req.params.id || d.doctorId === req.params.id);
     if (idx === -1) return res.status(404).json({ success: false, error: 'Doctor not found' });
-    doctors[idx] = { ...doctors[idx], ...req.body };
+    const now = new Date().toISOString();
+    doctors[idx] = {
+      ...doctors[idx],
+      ...req.body,
+      doctorId: doctors[idx].doctorId || doctors[idx].id,
+      updatedAt: now
+    };
+    saveDurableStore();
+    res.json({ success: true, data: doctors[idx] });
+  });
+
+  app.patch('/api/v1/doctors/:id', (req: Request, res: Response) => {
+    const idx = doctors.findIndex(d => d.id === req.params.id || d.doctorId === req.params.id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'Doctor not found' });
+    const now = new Date().toISOString();
+    doctors[idx] = {
+      ...doctors[idx],
+      ...req.body,
+      doctorId: doctors[idx].doctorId || doctors[idx].id,
+      updatedAt: now
+    };
     saveDurableStore();
     res.json({ success: true, data: doctors[idx] });
   });
 
   app.delete('/api/v1/doctors/:id', (req: Request, res: Response) => {
-    const idx = doctors.findIndex(d => d.id === req.params.id);
+    const idx = doctors.findIndex(d => d.id === req.params.id || d.doctorId === req.params.id);
     if (idx === -1) return res.status(404).json({ success: false, error: 'Doctor not found' });
     const deleted = doctors.splice(idx, 1)[0];
     saveDurableStore();
@@ -810,39 +936,780 @@ async function startServer() {
     res.json({ success: true, data: events });
   });
 
-  // 4. Follow-up Tasks
+  // 4. Follow-up Tasks (Enriched Generic Foundation)
   app.get('/api/v1/followups', (req: Request, res: Response) => {
-    res.json({ success: true, data: followups });
+    const { entityType, entityId, doctorId, status, priority } = req.query;
+    let list = followups.map(f => {
+      const resolvedDoctor = f.doctorId ? doctors.find(d => d.id === f.doctorId || d.doctorId === f.doctorId) : undefined;
+      return {
+        ...f,
+        id: f.id || f.followUpId,
+        followUpId: f.followUpId || f.id,
+        entityType: f.entityType || (f.doctorId ? 'DOCTOR' : 'DOCTOR'),
+        entityId: f.entityId || f.doctorId || (resolvedDoctor ? resolvedDoctor.id : 'doc-1'),
+        doctorName: f.doctorName || (resolvedDoctor ? resolvedDoctor.name : 'Target Entity'),
+        doctorArea: f.doctorArea || (resolvedDoctor ? resolvedDoctor.area : 'Territory'),
+        status: f.status || 'PENDING'
+      };
+    });
+
+    if (entityType && typeof entityType === 'string' && entityType !== 'all') {
+      list = list.filter(f => f.entityType.toUpperCase() === entityType.toUpperCase());
+    }
+    if (entityId && typeof entityId === 'string' && entityId !== 'all') {
+      list = list.filter(f => f.entityId === entityId || (f.doctorId && f.doctorId === entityId));
+    }
+    if (doctorId && typeof doctorId === 'string' && doctorId !== 'all') {
+      list = list.filter(f => f.doctorId === doctorId || (f.entityType === 'DOCTOR' && f.entityId === doctorId));
+    }
+    if (status && typeof status === 'string' && status !== 'all') {
+      list = list.filter(f => String(f.status).toLowerCase() === status.toLowerCase());
+    }
+    if (priority && typeof priority === 'string' && priority !== 'all') {
+      list = list.filter(f => String(f.priority).toLowerCase() === priority.toLowerCase());
+    }
+
+    res.json({ success: true, data: list, count: list.length });
+  });
+
+  app.get('/api/v1/followups/:id', (req: Request, res: Response) => {
+    const f = followups.find(item => item.id === req.params.id || item.followUpId === req.params.id);
+    if (!f) return res.status(404).json({ success: false, error: 'Follow-up not found' });
+    const resolvedDoctor = f.doctorId ? doctors.find(d => d.id === f.doctorId || d.doctorId === f.doctorId) : undefined;
+    const normalized = {
+      ...f,
+      id: f.id || f.followUpId,
+      followUpId: f.followUpId || f.id,
+      entityType: f.entityType || (f.doctorId ? 'DOCTOR' : 'DOCTOR'),
+      entityId: f.entityId || f.doctorId || (resolvedDoctor ? resolvedDoctor.id : 'doc-1'),
+      doctorName: f.doctorName || (resolvedDoctor ? resolvedDoctor.name : 'Target Entity'),
+      doctorArea: f.doctorArea || (resolvedDoctor ? resolvedDoctor.area : 'Territory'),
+      status: f.status || 'PENDING'
+    };
+    res.json({ success: true, data: normalized });
   });
 
   app.post('/api/v1/followups', (req: Request, res: Response) => {
-    const { doctorId, title, dueDate, priority } = req.body;
-    const doc = doctors.find(d => d.id === doctorId);
+    const payload = req.body;
+    const { title, dueDate, priority, status, notes, assignedTo, entityType, entityId, doctorId } = payload;
+    
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      return res.status(400).json({ success: false, error: 'title is required' });
+    }
+    if (!dueDate || typeof dueDate !== 'string' || !dueDate.trim()) {
+      return res.status(400).json({ success: false, error: 'dueDate is required' });
+    }
+
+    const resolvedEntityType: FollowUpEntityType = (entityType && typeof entityType === 'string') 
+      ? (entityType.toUpperCase() as FollowUpEntityType)
+      : (doctorId ? 'DOCTOR' : 'DOCTOR');
+
+    const VALID_ENTITIES: FollowUpEntityType[] = ['DOCTOR', 'PATIENT', 'LEAD', 'REFERRAL', 'VISIT', 'ORDER', 'TRIAL', 'RENEWAL'];
+    if (!VALID_ENTITIES.includes(resolvedEntityType)) {
+      return res.status(400).json({ success: false, error: `Invalid entityType. Allowed: ${VALID_ENTITIES.join(', ')}` });
+    }
+
+    const resolvedEntityId = entityId || doctorId || (resolvedEntityType === 'DOCTOR' ? doctors[0]?.id : 'ent-1');
+
+    // Relationship existence check if an explicit target is provided
+    if (resolvedEntityType === 'DOCTOR' && (doctorId || entityId)) {
+      const docExists = doctors.some(d => d.id === resolvedEntityId || d.doctorId === resolvedEntityId);
+      if (!docExists) return res.status(400).json({ success: false, error: 'Referenced doctor not found' });
+    }
+    if (resolvedEntityType === 'PATIENT' && entityId) {
+      const patExists = patients.some(p => p.patientId === entityId || (p as any).id === entityId);
+      if (!patExists) return res.status(400).json({ success: false, error: 'Referenced patient not found' });
+    }
+    if (resolvedEntityType === 'LEAD' && entityId) {
+      const leadExists = leads.some(l => l.leadId === entityId || (l as any).id === entityId);
+      if (!leadExists) return res.status(400).json({ success: false, error: 'Referenced lead not found' });
+    }
+
+    const VALID_STATUSES: string[] = ['PENDING', 'COMPLETED', 'CANCELLED', 'OVERDUE', 'pending', 'in_progress', 'completed', 'cancelled'];
+    const resolvedStatus = status || 'PENDING';
+    if (!VALID_STATUSES.includes(resolvedStatus)) {
+      return res.status(400).json({ success: false, error: `Invalid status. Allowed: PENDING, COMPLETED, CANCELLED, OVERDUE` });
+    }
+
+    const id = `tsk-${Date.now()}`;
+    const doc = resolvedEntityType === 'DOCTOR' ? doctors.find(d => d.id === resolvedEntityId || d.doctorId === resolvedEntityId) : null;
+    const now = new Date().toISOString();
+
     const newTask: FollowupTask = {
-      id: `tsk-${Date.now()}`,
-      doctorId,
-      doctorName: doc ? doc.name : 'Doctor',
-      doctorArea: doc ? doc.area : 'Territory',
-      title,
-      dueDate,
+      id,
+      followUpId: id,
+      entityType: resolvedEntityType,
+      entityId: resolvedEntityId,
+      doctorId: doc ? doc.id : (resolvedEntityType === 'DOCTOR' ? resolvedEntityId : undefined),
+      doctorName: doc ? doc.name : (payload.doctorName || 'Target Entity'),
+      doctorArea: doc ? doc.area : (payload.doctorArea || 'Territory'),
+      title: title.trim(),
+      dueDate: dueDate.trim(),
       priority: priority || 'medium',
-      status: 'pending',
-      source: 'manual'
+      status: resolvedStatus,
+      notes: notes || undefined,
+      assignedTo: assignedTo || undefined,
+      isCompleted: resolvedStatus === 'COMPLETED' || resolvedStatus === 'completed',
+      source: payload.source || 'manual',
+      createdAt: now,
+      updatedAt: now
     };
+
     followups.unshift(newTask);
     saveDurableStore();
     res.status(201).json({ success: true, data: newTask });
   });
 
-  app.patch('/api/v1/followups/:id', (req: Request, res: Response) => {
-    const idx = followups.findIndex(f => f.id === req.params.id);
-    if (idx === -1) return res.status(404).json({ success: false, error: 'Task not found' });
-    followups[idx] = { ...followups[idx], ...req.body };
-    if (req.body.status === 'completed') {
-      followups[idx].completedAt = new Date().toISOString();
+  app.put('/api/v1/followups/:id', (req: Request, res: Response) => {
+    const idx = followups.findIndex(f => f.id === req.params.id || f.followUpId === req.params.id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'Follow-up not found' });
+
+    const VALID_STATUSES: string[] = ['PENDING', 'COMPLETED', 'CANCELLED', 'OVERDUE', 'pending', 'in_progress', 'completed', 'cancelled'];
+    if (req.body.status && !VALID_STATUSES.includes(req.body.status)) {
+      return res.status(400).json({ success: false, error: 'Invalid follow-up status' });
     }
+
+    const now = new Date().toISOString();
+    followups[idx] = {
+      ...followups[idx],
+      ...req.body,
+      id: followups[idx].id || followups[idx].followUpId,
+      followUpId: followups[idx].followUpId || followups[idx].id,
+      updatedAt: now
+    };
+
+    if (req.body.status === 'completed' || req.body.status === 'COMPLETED') {
+      followups[idx].completedAt = now;
+      followups[idx].isCompleted = true;
+    }
+
     saveDurableStore();
     res.json({ success: true, data: followups[idx] });
+  });
+
+  app.patch('/api/v1/followups/:id', (req: Request, res: Response) => {
+    const idx = followups.findIndex(f => f.id === req.params.id || f.followUpId === req.params.id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'Task not found' });
+
+    const VALID_STATUSES: string[] = ['PENDING', 'COMPLETED', 'CANCELLED', 'OVERDUE', 'pending', 'in_progress', 'completed', 'cancelled'];
+    if (req.body.status && !VALID_STATUSES.includes(req.body.status)) {
+      return res.status(400).json({ success: false, error: 'Invalid follow-up status' });
+    }
+
+    const now = new Date().toISOString();
+    followups[idx] = {
+      ...followups[idx],
+      ...req.body,
+      id: followups[idx].id || followups[idx].followUpId,
+      followUpId: followups[idx].followUpId || followups[idx].id,
+      updatedAt: now
+    };
+
+    if (req.body.status === 'completed' || req.body.status === 'COMPLETED') {
+      followups[idx].completedAt = now;
+      followups[idx].isCompleted = true;
+    }
+
+    saveDurableStore();
+    res.json({ success: true, data: followups[idx] });
+  });
+
+  app.delete('/api/v1/followups/:id', (req: Request, res: Response) => {
+    const idx = followups.findIndex(f => f.id === req.params.id || f.followUpId === req.params.id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'Follow-up not found' });
+    const deleted = followups.splice(idx, 1)[0];
+    saveDurableStore();
+    res.json({ success: true, message: 'Follow-up deleted successfully', data: deleted });
+  });
+
+  // 4b. Patient CRM Foundation (v1.6.1)
+  const VALID_PATIENT_SOURCES: PatientAcquisitionSource[] = [
+    'DOCTOR_REFERRAL',
+    'META_AD',
+    'MY_GLUCO_GUIDE',
+    'WEBSITE',
+    'ECOMMERCE',
+    'WHATSAPP',
+    'EMAIL',
+    'EXISTING_PATIENT',
+    'OTHER'
+  ];
+
+  const VALID_PATIENT_STATUSES: PatientCRMStatus[] = [
+    'LEAD',
+    'QUALIFIED',
+    'REFERRED',
+    'PURCHASED',
+    'ACTIVE',
+    'RENEWAL_DUE',
+    'RENEWED',
+    'INACTIVE',
+    'LOST'
+  ];
+
+  app.get('/api/v1/patients', (req: Request, res: Response) => {
+    const { search, status, doctorId, city, acquisitionSource } = req.query;
+    let list = [...patients];
+
+    if (search && typeof search === 'string') {
+      const q = search.toLowerCase();
+      list = list.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        p.phone.includes(q) ||
+        p.city.toLowerCase().includes(q) ||
+        (p.email && p.email.toLowerCase().includes(q))
+      );
+    }
+    if (status && typeof status === 'string' && status !== 'all') {
+      list = list.filter(p => p.status === status);
+    }
+    if (doctorId && typeof doctorId === 'string' && doctorId !== 'all') {
+      list = list.filter(p => p.doctorId === doctorId);
+    }
+    if (city && typeof city === 'string' && city !== 'all') {
+      list = list.filter(p => p.city.toLowerCase() === city.toLowerCase());
+    }
+    if (acquisitionSource && typeof acquisitionSource === 'string' && acquisitionSource !== 'all') {
+      list = list.filter(p => p.acquisitionSource === acquisitionSource);
+    }
+
+    res.json({ success: true, data: list, count: list.length });
+  });
+
+  app.get('/api/v1/patients/:id', (req: Request, res: Response) => {
+    const patient = patients.find(p => p.patientId === req.params.id || (p as any).id === req.params.id);
+    if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' });
+
+    const doctor = patient.doctorId ? doctors.find(d => d.id === patient.doctorId || d.doctorId === patient.doctorId) : null;
+    const patientReferrals = referrals.filter(r => r.patientId === patient.patientId);
+    const patientOrders = orders.filter(o => o.patientId === patient.patientId);
+    const patientSensors = sensors.filter(s => s.patientId === patient.patientId);
+    const patientFollowups = followups.filter(f => (f.entityType === 'PATIENT' && f.entityId === patient.patientId) || (f as any).patientId === patient.patientId);
+
+    res.json({
+      success: true,
+      data: {
+        ...patient,
+        doctor: doctor ? { id: doctor.id, name: doctor.name, specialty: doctor.specialty, hospital: doctor.hospital } : null,
+        referrals: patientReferrals,
+        orders: patientOrders,
+        sensors: patientSensors,
+        followups: patientFollowups
+      }
+    });
+  });
+
+  app.post('/api/v1/patients', (req: Request, res: Response) => {
+    const { name, phone, whatsapp, email, city, doctorId, acquisitionSource, status } = req.body;
+
+    // Required fields validation
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+    if (!phone || typeof phone !== 'string' || !phone.trim()) {
+      return res.status(400).json({ success: false, error: 'phone is required' });
+    }
+    if (!city || typeof city !== 'string' || !city.trim()) {
+      return res.status(400).json({ success: false, error: 'city is required' });
+    }
+    if (!acquisitionSource || !VALID_PATIENT_SOURCES.includes(acquisitionSource)) {
+      return res.status(400).json({
+        success: false,
+        error: `Valid acquisitionSource is required. Allowed: ${VALID_PATIENT_SOURCES.join(', ')}`
+      });
+    }
+
+    // Status validation
+    const resolvedStatus: PatientCRMStatus = status || 'LEAD';
+    if (!VALID_PATIENT_STATUSES.includes(resolvedStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${VALID_PATIENT_STATUSES.join(', ')}`
+      });
+    }
+
+    // Doctor relationship validation
+    if (doctorId) {
+      const doc = doctors.find(d => d.id === doctorId || d.doctorId === doctorId);
+      if (!doc) {
+        return res.status(400).json({ success: false, error: 'Referenced doctorId not found' });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const newPatient: PatientCRM = {
+      patientId: `pat-${Date.now()}`,
+      name: name.trim(),
+      phone: phone.trim(),
+      whatsapp: whatsapp ? String(whatsapp).trim() : undefined,
+      email: email ? String(email).trim() : undefined,
+      city: city.trim(),
+      doctorId: doctorId || undefined,
+      acquisitionSource,
+      status: resolvedStatus,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    patients.unshift(newPatient);
+    saveDurableStore();
+    res.status(201).json({ success: true, data: newPatient });
+  });
+
+  app.put('/api/v1/patients/:id', (req: Request, res: Response) => {
+    const idx = patients.findIndex(p => p.patientId === req.params.id || (p as any).id === req.params.id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'Patient not found' });
+
+    const payload = req.body;
+    if (payload.acquisitionSource && !VALID_PATIENT_SOURCES.includes(payload.acquisitionSource)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid acquisitionSource. Allowed: ${VALID_PATIENT_SOURCES.join(', ')}`
+      });
+    }
+    if (payload.status && !VALID_PATIENT_STATUSES.includes(payload.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${VALID_PATIENT_STATUSES.join(', ')}`
+      });
+    }
+    if (payload.doctorId) {
+      const doc = doctors.find(d => d.id === payload.doctorId || d.doctorId === payload.doctorId);
+      if (!doc) return res.status(400).json({ success: false, error: 'Referenced doctorId not found' });
+    }
+
+    const now = new Date().toISOString();
+    patients[idx] = {
+      ...patients[idx],
+      name: payload.name !== undefined ? String(payload.name).trim() : patients[idx].name,
+      phone: payload.phone !== undefined ? String(payload.phone).trim() : patients[idx].phone,
+      whatsapp: payload.whatsapp !== undefined ? String(payload.whatsapp).trim() : patients[idx].whatsapp,
+      email: payload.email !== undefined ? String(payload.email).trim() : patients[idx].email,
+      city: payload.city !== undefined ? String(payload.city).trim() : patients[idx].city,
+      doctorId: payload.doctorId !== undefined ? payload.doctorId : patients[idx].doctorId,
+      acquisitionSource: payload.acquisitionSource || patients[idx].acquisitionSource,
+      status: payload.status || patients[idx].status,
+      updatedAt: now
+    };
+
+    saveDurableStore();
+    res.json({ success: true, data: patients[idx] });
+  });
+
+  // 4c. Lead Management Foundation (v1.6.1)
+  const VALID_LEAD_STATUSES: LeadStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'CONVERTED', 'LOST'];
+
+  app.get('/api/v1/leads', (req: Request, res: Response) => {
+    const { search, status, source, assignedTo } = req.query;
+    let list = [...leads];
+
+    if (search && typeof search === 'string') {
+      const q = search.toLowerCase();
+      list = list.filter(l =>
+        l.name.toLowerCase().includes(q) ||
+        l.phone.includes(q) ||
+        (l.email && l.email.toLowerCase().includes(q))
+      );
+    }
+    if (status && typeof status === 'string' && status !== 'all') {
+      list = list.filter(l => l.status === status);
+    }
+    if (source && typeof source === 'string' && source !== 'all') {
+      list = list.filter(l => l.source.toLowerCase() === source.toLowerCase());
+    }
+    if (assignedTo && typeof assignedTo === 'string' && assignedTo !== 'all') {
+      list = list.filter(l => l.assignedTo === assignedTo);
+    }
+
+    res.json({ success: true, data: list, count: list.length });
+  });
+
+  app.get('/api/v1/leads/:id', (req: Request, res: Response) => {
+    const lead = leads.find(l => l.leadId === req.params.id || (l as any).id === req.params.id);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    res.json({ success: true, data: lead });
+  });
+
+  app.post('/api/v1/leads', (req: Request, res: Response) => {
+    const { name, phone, whatsapp, email, source, campaign, status, assignedTo } = req.body;
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+    if (!phone || typeof phone !== 'string' || !phone.trim()) {
+      return res.status(400).json({ success: false, error: 'phone is required' });
+    }
+    if (!source || typeof source !== 'string' || !source.trim()) {
+      return res.status(400).json({ success: false, error: 'source is required' });
+    }
+
+    const resolvedStatus: LeadStatus = status || 'NEW';
+    if (!VALID_LEAD_STATUSES.includes(resolvedStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${VALID_LEAD_STATUSES.join(', ')}`
+      });
+    }
+
+    const now = new Date().toISOString();
+    const newLead: LeadCRM = {
+      leadId: `lead-${Date.now()}`,
+      name: name.trim(),
+      phone: phone.trim(),
+      whatsapp: whatsapp ? String(whatsapp).trim() : undefined,
+      email: email ? String(email).trim() : undefined,
+      source: source.trim(),
+      campaign: campaign ? String(campaign).trim() : undefined,
+      status: resolvedStatus,
+      assignedTo: assignedTo || undefined,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    leads.unshift(newLead);
+    saveDurableStore();
+    res.status(201).json({ success: true, data: newLead });
+  });
+
+  app.put('/api/v1/leads/:id', (req: Request, res: Response) => {
+    const idx = leads.findIndex(l => l.leadId === req.params.id || (l as any).id === req.params.id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    const payload = req.body;
+    if (payload.status && !VALID_LEAD_STATUSES.includes(payload.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${VALID_LEAD_STATUSES.join(', ')}`
+      });
+    }
+
+    if (payload.convertedPatientId) {
+      const patientExists = patients.some(p => p.patientId === payload.convertedPatientId);
+      if (!patientExists) {
+        return res.status(400).json({ success: false, error: 'Referenced convertedPatientId not found' });
+      }
+    }
+
+    const now = new Date().toISOString();
+    leads[idx] = {
+      ...leads[idx],
+      name: payload.name !== undefined ? String(payload.name).trim() : leads[idx].name,
+      phone: payload.phone !== undefined ? String(payload.phone).trim() : leads[idx].phone,
+      whatsapp: payload.whatsapp !== undefined ? String(payload.whatsapp).trim() : leads[idx].whatsapp,
+      email: payload.email !== undefined ? String(payload.email).trim() : leads[idx].email,
+      source: payload.source || leads[idx].source,
+      campaign: payload.campaign !== undefined ? payload.campaign : leads[idx].campaign,
+      status: payload.status || leads[idx].status,
+      assignedTo: payload.assignedTo !== undefined ? payload.assignedTo : leads[idx].assignedTo,
+      convertedPatientId: payload.convertedPatientId || leads[idx].convertedPatientId,
+      updatedAt: now
+    };
+
+    saveDurableStore();
+    res.json({ success: true, data: leads[idx] });
+  });
+
+  // 4d. Doctor → Patient Referral Foundation (v1.6.1)
+  const VALID_REFERRAL_STATUSES: ReferralStatus[] = ['REFERRED', 'CONTACTED', 'QUALIFIED', 'PURCHASED', 'LOST'];
+
+  app.get('/api/v1/referrals', (req: Request, res: Response) => {
+    const { doctorId, patientId, status } = req.query;
+    let list = [...referrals];
+
+    if (doctorId && typeof doctorId === 'string' && doctorId !== 'all') {
+      list = list.filter(r => r.doctorId === doctorId);
+    }
+    if (patientId && typeof patientId === 'string' && patientId !== 'all') {
+      list = list.filter(r => r.patientId === patientId);
+    }
+    if (status && typeof status === 'string' && status !== 'all') {
+      list = list.filter(r => r.status === status);
+    }
+
+    res.json({ success: true, data: list, count: list.length });
+  });
+
+  app.get('/api/v1/referrals/:id', (req: Request, res: Response) => {
+    const referral = referrals.find(r => r.referralId === req.params.id || (r as any).id === req.params.id);
+    if (!referral) return res.status(404).json({ success: false, error: 'Referral not found' });
+
+    const doc = doctors.find(d => d.id === referral.doctorId || d.doctorId === referral.doctorId);
+    const pat = patients.find(p => p.patientId === referral.patientId);
+
+    res.json({
+      success: true,
+      data: {
+        ...referral,
+        doctor: doc ? { id: doc.id, name: doc.name, specialty: doc.specialty, hospital: doc.hospital } : null,
+        patient: pat ? { patientId: pat.patientId, name: pat.name, phone: pat.phone, city: pat.city } : null
+      }
+    });
+  });
+
+  app.post('/api/v1/referrals', (req: Request, res: Response) => {
+    const { doctorId, patientId, referralDate, source, status, notes } = req.body;
+
+    if (!doctorId || typeof doctorId !== 'string') {
+      return res.status(400).json({ success: false, error: 'doctorId is required' });
+    }
+    if (!patientId || typeof patientId !== 'string') {
+      return res.status(400).json({ success: false, error: 'patientId is required' });
+    }
+
+    const doc = doctors.find(d => d.id === doctorId || d.doctorId === doctorId);
+    if (!doc) {
+      return res.status(400).json({ success: false, error: 'Referenced doctorId not found' });
+    }
+
+    const pat = patients.find(p => p.patientId === patientId);
+    if (!pat) {
+      return res.status(400).json({ success: false, error: 'Referenced patientId not found' });
+    }
+
+    const resolvedStatus: ReferralStatus = status || 'REFERRED';
+    if (!VALID_REFERRAL_STATUSES.includes(resolvedStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${VALID_REFERRAL_STATUSES.join(', ')}`
+      });
+    }
+
+    const resolvedDate = referralDate || new Date().toISOString().split('T')[0];
+    const now = new Date().toISOString();
+
+    // Check if an existing identical active referral exists to avoid erroneous duplicates
+    const existing = referrals.find(r => r.doctorId === doc.id && r.patientId === pat.patientId && r.referralDate === resolvedDate);
+    if (existing) {
+      return res.status(200).json({ success: true, data: existing, message: 'Referral already recorded for this date' });
+    }
+
+    const newReferral: DoctorPatientReferral = {
+      referralId: `ref-${Date.now()}`,
+      doctorId: doc.id,
+      patientId: pat.patientId,
+      referralDate: resolvedDate,
+      source: source || 'DOCTOR_OPD',
+      status: resolvedStatus,
+      notes: notes || undefined,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    referrals.unshift(newReferral);
+    saveDurableStore();
+    res.status(201).json({ success: true, data: newReferral });
+  });
+
+  // 4e. Order Foundation (v1.6.1)
+  const VALID_ORDER_SOURCES: OrderSource[] = [
+    'DOCTOR_REFERRAL',
+    'ECOMMERCE',
+    'META_AD',
+    'MY_GLUCO_GUIDE',
+    'WHATSAPP',
+    'DIRECT',
+    'OTHER'
+  ];
+
+  const VALID_PAYMENT_STATUSES: PaymentStatus[] = ['PENDING', 'PAID', 'FAILED', 'REFUNDED'];
+  const VALID_ORDER_STATUSES: OrderStatus[] = ['PENDING', 'PROCESSING', 'COMPLETED', 'CANCELLED'];
+
+  app.get('/api/v1/orders', (req: Request, res: Response) => {
+    const { patientId, orderStatus, paymentStatus } = req.query;
+    let list = [...orders];
+
+    if (patientId && typeof patientId === 'string' && patientId !== 'all') {
+      list = list.filter(o => o.patientId === patientId);
+    }
+    if (orderStatus && typeof orderStatus === 'string' && orderStatus !== 'all') {
+      list = list.filter(o => o.orderStatus === orderStatus);
+    }
+    if (paymentStatus && typeof paymentStatus === 'string' && paymentStatus !== 'all') {
+      list = list.filter(o => o.paymentStatus === paymentStatus);
+    }
+
+    res.json({ success: true, data: list, count: list.length });
+  });
+
+  app.get('/api/v1/orders/:id', (req: Request, res: Response) => {
+    const order = orders.find(o => o.orderId === req.params.id || (o as any).id === req.params.id);
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    res.json({ success: true, data: order });
+  });
+
+  app.post('/api/v1/orders', (req: Request, res: Response) => {
+    const { patientId, product, quantity, unitPrice, orderSource, paymentStatus, orderStatus, orderDate } = req.body;
+
+    if (!patientId || typeof patientId !== 'string') {
+      return res.status(400).json({ success: false, error: 'patientId is required' });
+    }
+    const pat = patients.find(p => p.patientId === patientId);
+    if (!pat) {
+      return res.status(400).json({ success: false, error: 'Referenced patientId not found' });
+    }
+
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      return res.status(400).json({ success: false, error: 'quantity must be a positive integer' });
+    }
+
+    const resolvedProduct = product || 'EvoCheck Premium Linx CGM';
+    const resolvedOrderSource: OrderSource = orderSource || 'DIRECT';
+    if (!VALID_ORDER_SOURCES.includes(resolvedOrderSource)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid orderSource. Allowed: ${VALID_ORDER_SOURCES.join(', ')}`
+      });
+    }
+
+    const resolvedPaymentStatus: PaymentStatus = paymentStatus || 'PENDING';
+    if (!VALID_PAYMENT_STATUSES.includes(resolvedPaymentStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid paymentStatus. Allowed: ${VALID_PAYMENT_STATUSES.join(', ')}`
+      });
+    }
+
+    const resolvedOrderStatus: OrderStatus = orderStatus || 'PENDING';
+    if (!VALID_ORDER_STATUSES.includes(resolvedOrderStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid orderStatus. Allowed: ${VALID_ORDER_STATUSES.join(', ')}`
+      });
+    }
+
+    // Grounded price lookup: use provided price if positive, else authorized controlled product pricing
+    let price = typeof unitPrice === 'number' && unitPrice > 0 ? unitPrice : 0;
+    if (price === 0) {
+      if (resolvedOrderSource === 'ECOMMERCE' || resolvedOrderSource === 'DIRECT') {
+        price = (EVOCHECK_PUBLIC_RETAIL_PRICING as any)?.amount || 13600;
+      } else {
+        price = (EVOCHECK_DISTRIBUTOR_PRICING as any)?.amount || 12900;
+      }
+    }
+
+    const total = quantity * price;
+    const now = new Date().toISOString();
+    const resolvedDate = orderDate || now.split('T')[0];
+
+    const newOrder: OrderCRM = {
+      orderId: `ord-${Date.now()}`,
+      patientId: pat.patientId,
+      orderDate: resolvedDate,
+      product: resolvedProduct,
+      quantity,
+      unitPrice: price,
+      total,
+      orderSource: resolvedOrderSource,
+      paymentStatus: resolvedPaymentStatus,
+      orderStatus: resolvedOrderStatus,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    orders.unshift(newOrder);
+    saveDurableStore();
+    res.status(201).json({ success: true, data: newOrder });
+  });
+
+  // 4f. Sensor Lifecycle Foundation (v1.6.1)
+  const VALID_SENSOR_STATUSES: SensorLifecycleStatus[] = [
+    'ACTIVE',
+    'EXPIRING',
+    'RENEWAL_DUE',
+    'RENEWED',
+    'EXPIRED',
+    'CANCELLED'
+  ];
+
+  app.get('/api/v1/sensors', (req: Request, res: Response) => {
+    const { patientId, status } = req.query;
+    let list = [...sensors];
+
+    if (patientId && typeof patientId === 'string' && patientId !== 'all') {
+      list = list.filter(s => s.patientId === patientId);
+    }
+    if (status && typeof status === 'string' && status !== 'all') {
+      list = list.filter(s => s.status === status);
+    }
+
+    res.json({ success: true, data: list, count: list.length });
+  });
+
+  app.get('/api/v1/sensors/:id', (req: Request, res: Response) => {
+    const sensor = sensors.find(s => s.sensorId === req.params.id || (s as any).id === req.params.id);
+    if (!sensor) return res.status(404).json({ success: false, error: 'Sensor not found' });
+    res.json({ success: true, data: sensor });
+  });
+
+  app.post('/api/v1/sensors', (req: Request, res: Response) => {
+    const { patientId, product, startDate, status } = req.body;
+
+    if (!patientId || typeof patientId !== 'string') {
+      return res.status(400).json({ success: false, error: 'patientId is required' });
+    }
+    const pat = patients.find(p => p.patientId === patientId);
+    if (!pat) {
+      return res.status(400).json({ success: false, error: 'Referenced patientId not found' });
+    }
+
+    if (!startDate || typeof startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(startDate)) {
+      return res.status(400).json({ success: false, error: 'startDate in YYYY-MM-DD format is required' });
+    }
+
+    const resolvedStatus: SensorLifecycleStatus = status || 'ACTIVE';
+    if (!VALID_SENSOR_STATUSES.includes(resolvedStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${VALID_SENSOR_STATUSES.join(', ')}`
+      });
+    }
+
+    const resolvedProduct = product || 'EvoCheck Premium Linx CGM';
+    // Retrieve wear duration from controlled knowledge base rather than hardcoded scattered integers
+    const wearDays = getProductWearDurationDays(resolvedProduct);
+    const { expectedEndDate, renewalDate } = calculateSensorDates(startDate, wearDays);
+    const now = new Date().toISOString();
+
+    const newSensor: SensorLifecycle = {
+      sensorId: `sen-${Date.now()}`,
+      patientId: pat.patientId,
+      product: resolvedProduct,
+      startDate: startDate.slice(0, 10),
+      expectedEndDate,
+      renewalDate,
+      status: resolvedStatus,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    sensors.unshift(newSensor);
+    saveDurableStore();
+    res.status(201).json({ success: true, data: newSensor });
+  });
+
+  app.put('/api/v1/sensors/:id', (req: Request, res: Response) => {
+    const idx = sensors.findIndex(s => s.sensorId === req.params.id || (s as any).id === req.params.id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'Sensor not found' });
+
+    const payload = req.body;
+    if (payload.status && !VALID_SENSOR_STATUSES.includes(payload.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${VALID_SENSOR_STATUSES.join(', ')}`
+      });
+    }
+
+    const now = new Date().toISOString();
+    sensors[idx] = {
+      ...sensors[idx],
+      status: payload.status || sensors[idx].status,
+      renewalDate: payload.renewalDate || sensors[idx].renewalDate,
+      expectedEndDate: payload.expectedEndDate || sensors[idx].expectedEndDate,
+      updatedAt: now
+    };
+
+    saveDurableStore();
+    res.json({ success: true, data: sensors[idx] });
   });
 
   // 5. Patient Opportunities & Sales
@@ -1478,13 +2345,13 @@ You are the MedRep AI Territory & Clinical Intelligence Assistant.
 Answer the Medical Representative's question using ONLY the factual CRM context and verified product knowledge provided below.
 
 CRITICAL KNOWLEDGE & PRICING GUARDRAILS:
-1. Use ONLY the supplied verified product knowledge for product claims (MARD: 8.66%, 15-day wear, IP68 water resistance, BLE connectivity, 1-min interval, DRAP approved).
+1. Use ONLY the supplied verified product knowledge for product claims (MARD: 8.66%, 15-day wear, IP68 water resistance, BLE connectivity, 1-min interval, DRAP approved). Always explicitly describe the 8.66% MARD rating as a "Verified Product Specification".
 2. When asked "What is our distributor price?":
    -> Answer: "PKR 12,900 per EvoCheck Premium Linx sensor/unit." (Authorized internal trade price, Visibility: INTERNAL).
 3. When asked "What is the patient/public online price?":
    -> Answer: "PKR 13,600, based on the current MyPharmEvo listing." (Regular PKR 17,000, 20% promotional discount).
 4. When asked about hospital/institutional price:
-   -> Answer: "Institutional pricing is not currently configured in the verified knowledge base."
+   -> Answer: "Institutional pricing is currently NOT_CONFIGURED in the verified knowledge base."
 5. Clearly distinguish distributor/internal price from patient-facing retail price. Do NOT treat the distributor price as the public patient retail price, and do NOT invent unverified discounts or margins.
 6. NEVER state 8.8% MARD, 14-day wear, or IP28 for EvoCheck.
 7. If the user asks about an EvoCheck specification or clinical claim that is NOT present in the verified knowledge base, you MUST state:

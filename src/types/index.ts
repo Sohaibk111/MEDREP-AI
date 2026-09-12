@@ -26,8 +26,19 @@ export interface DoctorTiming {
   source: SourceType;
 }
 
+export type DoctorRelationshipStatus =
+  | 'NEW'
+  | 'PROSPECT'
+  | 'ENGAGED'
+  | 'INTERESTED'
+  | 'TRIAL'
+  | 'PRESCRIBER'
+  | 'ACTIVE_PRESCRIBER'
+  | 'DORMANT';
+
 export interface Doctor {
   id: string;
+  doctorId?: string;
   name: string;
   specialty: string;
   subSpecialty?: string;
@@ -35,10 +46,16 @@ export interface Doctor {
   hospital: string;
   clinic: string;
   area: string; // e.g. "PWD", "Saidpur Road", "Commercial Market", "PIMS", "Shifa International"
+  territory?: string;
   city: string;
   address: string;
+  phone?: string;
+  whatsapp?: string;
+  email?: string;
   priority: PriorityTier;
+  relationshipStatus?: DoctorRelationshipStatus;
   prescriberStatus: PrescriberStatus;
+  preferredCallTime?: string;
   cgmPotential: CGMPotential;
   affordabilityTier: AffordabilityTier;
   relationshipStrength: number; // 1-5
@@ -56,6 +73,8 @@ export interface Doctor {
   notes?: string;
   isVerified: boolean;
   hasConflict?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface VisitObjective {
@@ -94,20 +113,199 @@ export interface Visit {
   nextVisitObjective?: string;
 }
 
+export type FollowUpEntityType =
+  | 'DOCTOR'
+  | 'PATIENT'
+  | 'LEAD'
+  | 'REFERRAL'
+  | 'VISIT'
+  | 'ORDER'
+  | 'TRIAL'
+  | 'RENEWAL';
+
+export type FollowUpStatus =
+  | 'PENDING'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'OVERDUE';
+
 export interface FollowupTask {
   id: string;
-  doctorId: string;
-  doctorName: string;
+  followUpId?: string;
+  entityType?: FollowUpEntityType;
+  entityId?: string;
+  doctorId?: string;
+  doctorName?: string;
   doctorArea?: string;
   visitId?: string;
   title: string;
   dueDate: string;
-  priority: TaskPriority;
-  status: TaskStatus;
+  priority: TaskPriority | 'high' | 'medium' | 'low' | 'URGENT' | 'HIGH' | 'MEDIUM' | 'LOW';
+  status: TaskStatus | FollowUpStatus | 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'OVERDUE';
   isCompleted?: boolean;
-  source: 'visit' | 'manual' | 'ai_recommendation';
+  source?: 'visit' | 'manual' | 'ai_recommendation';
   completedAt?: string;
   completedNotes?: string;
+  notes?: string;
+  assignedTo?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GenericFollowUp {
+  followUpId: string;
+  entityType: FollowUpEntityType;
+  entityId: string;
+  dueDate: string;
+  priority: 'high' | 'medium' | 'low' | 'URGENT' | 'HIGH' | 'MEDIUM' | 'LOW';
+  status: FollowUpStatus | TaskStatus | string;
+  title: string;
+  notes?: string;
+  assignedTo?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  id?: string;
+  doctorId?: string;
+  doctorName?: string;
+  doctorArea?: string;
+  visitId?: string;
+  isCompleted?: boolean;
+  source?: 'visit' | 'manual' | 'ai_recommendation';
+  completedNotes?: string;
+}
+
+export type PatientAcquisitionSource =
+  | 'DOCTOR_REFERRAL'
+  | 'META_AD'
+  | 'MY_GLUCO_GUIDE'
+  | 'WEBSITE'
+  | 'ECOMMERCE'
+  | 'WHATSAPP'
+  | 'EMAIL'
+  | 'EXISTING_PATIENT'
+  | 'OTHER';
+
+export type PatientCRMStatus =
+  | 'LEAD'
+  | 'QUALIFIED'
+  | 'REFERRED'
+  | 'PURCHASED'
+  | 'ACTIVE'
+  | 'RENEWAL_DUE'
+  | 'RENEWED'
+  | 'INACTIVE'
+  | 'LOST';
+
+export interface PatientCRM {
+  patientId: string;
+  name: string;
+  phone: string;
+  whatsapp?: string;
+  email?: string;
+  city: string;
+  doctorId?: string;
+  acquisitionSource: PatientAcquisitionSource;
+  status: PatientCRMStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LeadStatus =
+  | 'NEW'
+  | 'CONTACTED'
+  | 'QUALIFIED'
+  | 'CONVERTED'
+  | 'LOST';
+
+export interface LeadCRM {
+  leadId: string;
+  name: string;
+  phone: string;
+  whatsapp?: string;
+  email?: string;
+  source: string;
+  campaign?: string;
+  status: LeadStatus;
+  assignedTo?: string;
+  createdAt: string;
+  updatedAt?: string;
+  convertedPatientId?: string;
+}
+
+export type ReferralStatus =
+  | 'REFERRED'
+  | 'CONTACTED'
+  | 'QUALIFIED'
+  | 'PURCHASED'
+  | 'LOST';
+
+export interface DoctorPatientReferral {
+  referralId: string;
+  doctorId: string;
+  patientId: string;
+  referralDate: string;
+  source: string;
+  status: ReferralStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type OrderSource =
+  | 'DOCTOR_REFERRAL'
+  | 'ECOMMERCE'
+  | 'META_AD'
+  | 'MY_GLUCO_GUIDE'
+  | 'WHATSAPP'
+  | 'DIRECT'
+  | 'OTHER';
+
+export type PaymentStatus =
+  | 'PENDING'
+  | 'PAID'
+  | 'FAILED'
+  | 'REFUNDED';
+
+export type OrderStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'COMPLETED'
+  | 'CANCELLED';
+
+export interface OrderCRM {
+  orderId: string;
+  patientId: string;
+  orderDate: string;
+  product: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  orderSource: OrderSource;
+  paymentStatus: PaymentStatus;
+  orderStatus: OrderStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SensorLifecycleStatus =
+  | 'ACTIVE'
+  | 'EXPIRING'
+  | 'RENEWAL_DUE'
+  | 'RENEWED'
+  | 'EXPIRED'
+  | 'CANCELLED';
+
+export interface SensorLifecycle {
+  sensorId: string;
+  patientId: string;
+  product: string;
+  startDate: string;
+  expectedEndDate: string;
+  renewalDate: string;
+  status: SensorLifecycleStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AnonymousPatientOpportunity {
