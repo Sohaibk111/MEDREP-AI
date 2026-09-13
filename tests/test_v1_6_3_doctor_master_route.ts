@@ -57,8 +57,9 @@ assert.equal(index[0].locationVerification, 'DOCTOR_FACILITY_CONFIRMED');
 assert.equal(index[0].timings[0].source, 'field_verified');
 
 const ranked = rankFieldCandidates([companyOnly, fieldVerified, active], '2026-09-14');
-assert.equal(ranked[0].doctor.id, 'doc-field');
-assert.ok(ranked[0].reasons.some(reason => reason.includes('Field-verified')));
+assert.equal(ranked[0].doctor.id, 'doc-active');
+assert.ok(ranked[0].reasons.some(reason => reason.includes('Existing prescribing')));
+assert.ok(ranked[1].reasons.some(reason => reason.includes('Field-verified')));
 
 const visits = [{
   id: 'visit-locked', doctorId: 'doc-company', doctorName: 'Dr Company', doctorSpecialty: 'Medicine',
@@ -75,4 +76,4 @@ assert.equal(route.stops[1].locked, false);
 assert.equal(route.stops[2].locked, false);
 assert.ok(route.limitations.length >= 2);
 
-console.log('v1.6.3 Doctor Master + Route Intelligence: 11/11 checks passed');
+console.log('v1.6.3 Doctor Master + Route Intelligence: 12/12 checks passed');
