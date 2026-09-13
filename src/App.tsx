@@ -4,6 +4,7 @@ import { Sidebar, NavTab } from './components/Sidebar';
 import { BottomNav } from './components/BottomNav';
 import { MorningBriefingView } from './views/MorningBriefingView';
 import { DoctorCRMView } from './views/DoctorCRMView';
+import { PatientCRMView } from './views/PatientCRMView';
 import { FieldPlannerView } from './views/FieldPlannerView';
 import { AICoachFullView } from './views/AICoachFullView';
 import { FollowupsView } from './views/FollowupsView';
@@ -16,7 +17,9 @@ import { VoiceNoteModal } from './components/VoiceNoteModal';
 import { AITerritoryChatModal } from './components/AITerritoryChatModal';
 import { DataConflictsModal } from './components/DataConflictsModal';
 import { DoctorDetailModal } from './components/DoctorDetailModal';
+import { PatientDetailModal } from './components/PatientDetailModal';
 import { AddDoctorModal } from './components/AddDoctorModal';
+import { AddPatientModal } from './components/AddPatientModal';
 import { AddVisitModal } from './components/AddVisitModal';
 import { AddTaskModal } from './components/AddTaskModal';
 import { AddPatientOppModal } from './components/AddPatientOppModal';
@@ -74,7 +77,10 @@ export function App() {
   const [isAIChatModalOpen, setIsAIChatModalOpen] = useState(false);
   const [isConflictsModalOpen, setIsConflictsModalOpen] = useState(false);
   const [isDoctorDetailModalOpen, setIsDoctorDetailModalOpen] = useState(false);
+  const [selectedPatientIdForDetail, setSelectedPatientIdForDetail] = useState<string | null>(null);
+  const [isPatientDetailModalOpen, setIsPatientDetailModalOpen] = useState(false);
   const [isAddDoctorModalOpen, setIsAddDoctorModalOpen] = useState(false);
+  const [isAddPatientModalOpen, setIsAddPatientModalOpen] = useState(false);
   const [isAddVisitModalOpen, setIsAddVisitModalOpen] = useState(false);
   const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
   const [isAddPatientOppModalOpen, setIsAddPatientOppModalOpen] = useState(false);
@@ -82,6 +88,11 @@ export function App() {
   const [isLogOutcomeModalOpen, setIsLogOutcomeModalOpen] = useState(false);
   const [outcomeTargetDoctor, setOutcomeTargetDoctor] = useState<Doctor | null>(null);
   const [outcomeTargetVisit, setOutcomeTargetVisit] = useState<Visit | null>(null);
+
+  const handleOpenPatientDetail = (patientId: string) => {
+    setSelectedPatientIdForDetail(patientId);
+    setIsPatientDetailModalOpen(true);
+  };
 
   useEffect(() => {
     loadAllData();
@@ -259,6 +270,15 @@ export function App() {
                 />
               )}
 
+              {activeTab === 'patients' && (
+                <PatientCRMView
+                  doctors={doctors}
+                  onOpenPatientDetail={handleOpenPatientDetail}
+                  onOpenDoctorDetail={handleOpenDoctorDetail}
+                  onAddPatient={() => setIsAddPatientModalOpen(true)}
+                />
+              )}
+
               {activeTab === 'planner' && (
                 <FieldPlannerView
                   plannerData={plannerData}
@@ -390,12 +410,36 @@ export function App() {
           setIsDoctorDetailModalOpen(false);
           setIsAddVisitModalOpen(true);
         }}
+        onOpenPatientDetail={(patId) => {
+          setIsDoctorDetailModalOpen(false);
+          handleOpenPatientDetail(patId);
+        }}
+        onDoctorUpdated={loadAllData}
+      />
+
+      <PatientDetailModal
+        isOpen={isPatientDetailModalOpen}
+        onClose={() => setIsPatientDetailModalOpen(false)}
+        patientId={selectedPatientIdForDetail}
+        doctors={doctors}
+        onOpenDoctorDetail={(doc) => {
+          setIsPatientDetailModalOpen(false);
+          handleOpenDoctorDetail(doc);
+        }}
+        onPatientUpdated={loadAllData}
       />
 
       <AddDoctorModal
         isOpen={isAddDoctorModalOpen}
         onClose={() => setIsAddDoctorModalOpen(false)}
         onDoctorAdded={loadAllData}
+      />
+
+      <AddPatientModal
+        isOpen={isAddPatientModalOpen}
+        onClose={() => setIsAddPatientModalOpen(false)}
+        doctors={doctors}
+        onPatientAdded={loadAllData}
       />
 
       <AddVisitModal

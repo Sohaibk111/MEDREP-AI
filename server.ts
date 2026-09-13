@@ -44,6 +44,7 @@ import {
   LifecycleHistoryRecord,
   PrescriberLifecycleStatus,
   DoctorTimelineEvent,
+  PatientTimelineEvent,
   PatientCRM,
   PatientAcquisitionSource,
   PatientCRMStatus,
@@ -470,6 +471,27 @@ async function startServer() {
     const docReferrals = referrals.filter(r => r.doctorId === doc.id || (doc.doctorId && r.doctorId === doc.doctorId));
     const conflicts = dataConflicts.filter(c => c.entityId === doc.id && c.status === 'unresolved');
 
+    const referredPatients = patients
+      .filter(p => p.doctorId === doc.id || (doc.doctorId && p.doctorId === doc.doctorId) || docReferrals.some(r => r.patientId === p.patientId))
+      .map(p => {
+        const ref = docReferrals.find(r => r.patientId === p.patientId);
+        const pOrders = orders.filter(o => o.patientId === p.patientId);
+        const pSensors = sensors.filter(s => s.patientId === p.patientId);
+        const activeSensor = pSensors.find(s => s.status === 'ACTIVE' || s.status === 'RENEWAL_DUE');
+        return {
+          patientId: p.patientId,
+          name: p.name,
+          phone: p.phone,
+          status: p.status,
+          acquisitionSource: p.acquisitionSource,
+          city: p.city,
+          referralStatus: ref ? ref.status : undefined,
+          ordersCount: pOrders.length,
+          activeSensorStatus: activeSensor ? activeSensor.status : undefined,
+          sensorRenewalDate: activeSensor ? activeSensor.renewalDate : undefined
+        };
+      });
+
     res.json({
       success: true,
       data: {
@@ -485,6 +507,7 @@ async function startServer() {
         pendingTasks: docFollowups,
         patientOpportunities: docOpportunities,
         referrals: docReferrals,
+        referredPatients,
         conflicts
       }
     });
@@ -541,6 +564,7 @@ async function startServer() {
     doctors[idx] = {
       ...doctors[idx],
       ...req.body,
+      id: doctors[idx].id,
       doctorId: doctors[idx].doctorId || doctors[idx].id,
       updatedAt: now
     };
@@ -555,6 +579,7 @@ async function startServer() {
     doctors[idx] = {
       ...doctors[idx],
       ...req.body,
+      id: doctors[idx].id,
       doctorId: doctors[idx].doctorId || doctors[idx].id,
       updatedAt: now
     };
@@ -924,14 +949,67 @@ async function startServer() {
   });
 
   app.get('/api/v1/doctors/:id/timeline', (req: Request, res: Response) => {
-    const doctor = doctors.find(doc => doc.id === req.params.id);
+    const doctor = doctors.find(doc => doc.id === req.params.id || doc.doctorId === req.params.id);
     if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' });
+
+    const docReferrals = referrals.filter(r => r.doctorId === doctor.id || (doctor.doctorId && r.doctorId === doctor.doctorId));
+    const referredPatientIds = new Set<string>();
+    patients.filter(p => p.doctorId === doctor.id || (doctor.doctorId && p.doctorId === doctor.doctorId)).forEach(p => referredPatientIds.add(p.patientId));
+    docReferrals.forEach(r => referredPatientIds.add(r.patientId));
+
+    const docOrders = orders.filter(o => referredPatientIds.has(o.patientId));
+    const docSensors = sensors.filter(s => referredPatientIds.has(s.patientId));
+    const docFollowups = followups.filter(f => f.doctorId === doctor.id || (f.entityType === 'DOCTOR' && f.entityId === doctor.id));
+
     const events: DoctorTimelineEvent[] = [
       ...visits.filter(item => item.doctorId === doctor.id).map(item => ({ id: `visit-${item.id}`, type: 'VISIT' as const, occurredAt: `${item.scheduledDate}T00:00:00.000Z`, title: `Visit ${item.status}`, detail: item.summary, visitId: item.id })),
       ...outcomes.filter(item => item.doctorId === doctor.id).map(item => ({ id: `outcome-${item.id}`, type: 'OUTCOME' as const, occurredAt: item.timestamp, title: item.outcomeType, detail: item.notes, visitId: item.visitId })),
       ...sampleTransactions.filter(item => item.doctorId === doctor.id).map(item => ({ id: `sample-${item.id}`, type: 'SAMPLE' as const, occurredAt: item.recordedAt, title: `${item.quantity} sample unit${item.quantity === 1 ? '' : 's'} issued`, detail: item.notes, visitId: item.visitId })),
       ...lifecycleHistory.filter(item => item.doctorId === doctor.id).map(item => ({ id: `lifecycle-${item.id}`, type: 'LIFECYCLE' as const, occurredAt: item.recordedAt, title: `${item.previousStatus} → ${item.status}`, detail: item.reason })),
-      ...patientOpportunities.filter(item => item.doctorId === doctor.id).map(item => ({ id: `opportunity-${item.id}`, type: 'OPPORTUNITY' as const, occurredAt: item.updatedAt || item.createdAt || new Date(0).toISOString(), title: `Patient opportunity: ${item.status}`, detail: item.clinicalProfile }))
+      ...patientOpportunities.filter(item => item.doctorId === doctor.id).map(item => ({ id: `opportunity-${item.id}`, type: 'OPPORTUNITY' as const, occurredAt: item.updatedAt || item.createdAt || new Date(0).toISOString(), title: `Patient opportunity: ${item.status}`, detail: item.clinicalProfile })),
+      ...docReferrals.map(r => {
+        const p = patients.find(pat => pat.patientId === r.patientId);
+        return {
+          id: `referral-${r.referralId || (r as any).id}`,
+          type: 'REFERRAL' as const,
+          occurredAt: r.referralDate ? (r.referralDate.includes('T') ? r.referralDate : `${r.referralDate}T00:00:00.000Z`) : r.createdAt,
+          title: `Referred Patient: ${p ? p.name : r.patientId}`,
+          detail: `Referral status: ${r.status}${r.notes ? ' - ' + r.notes : ''}`,
+          patientId: r.patientId
+        };
+      }),
+      ...docOrders.map(o => {
+        const p = patients.find(pat => pat.patientId === o.patientId);
+        return {
+          id: `order-${o.orderId}`,
+          type: 'ORDER' as const,
+          occurredAt: o.orderDate ? (o.orderDate.includes('T') ? o.orderDate : `${o.orderDate}T00:00:00.000Z`) : o.createdAt,
+          title: `Referred Patient Order: ${o.product}`,
+          detail: `Patient: ${p ? p.name : o.patientId}, ${o.quantity} unit${o.quantity === 1 ? '' : 's'}, Total: PKR ${o.total.toLocaleString()}, Status: ${o.orderStatus}`,
+          patientId: o.patientId,
+          orderId: o.orderId
+        };
+      }),
+      ...docSensors.map(s => {
+        const p = patients.find(pat => pat.patientId === s.patientId);
+        return {
+          id: `sensor-${s.sensorId}`,
+          type: 'SENSOR' as const,
+          occurredAt: s.startDate ? (s.startDate.includes('T') ? s.startDate : `${s.startDate}T00:00:00.000Z`) : s.createdAt,
+          title: `Sensor Lifecycle: ${s.product}`,
+          detail: `Patient: ${p ? p.name : s.patientId}, Status: ${s.status}, Renewal: ${s.renewalDate}`,
+          patientId: s.patientId,
+          sensorId: s.sensorId
+        };
+      }),
+      ...docFollowups.map(f => ({
+        id: `followup-${f.id || f.followUpId}`,
+        type: 'FOLLOWUP' as const,
+        occurredAt: f.dueDate ? (f.dueDate.includes('T') ? f.dueDate : `${f.dueDate}T00:00:00.000Z`) : ((f as any).createdAt || new Date(0).toISOString()),
+        title: `Follow-up Task: ${f.title}`,
+        detail: `Priority: ${f.priority}, Status: ${f.status || (f.isCompleted ? 'completed' : 'pending')}`,
+        followupId: f.id || f.followUpId
+      }))
     ].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
     res.json({ success: true, data: events });
   });
@@ -1294,6 +1372,95 @@ async function startServer() {
 
     saveDurableStore();
     res.json({ success: true, data: patients[idx] });
+  });
+
+  app.get('/api/v1/patients/:id/timeline', (req: Request, res: Response) => {
+    const patient = patients.find(p => p.patientId === req.params.id || (p as any).id === req.params.id);
+    if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' });
+
+    const referringDoctor = patient.doctorId ? doctors.find(d => d.id === patient.doctorId || d.doctorId === patient.doctorId) : null;
+    const patientReferrals = referrals.filter(r => r.patientId === patient.patientId);
+    const patientOrders = orders.filter(o => o.patientId === patient.patientId);
+    const patientSensors = sensors.filter(s => s.patientId === patient.patientId);
+    const patientFollowups = followups.filter(f => (f.entityType === 'PATIENT' && f.entityId === patient.patientId) || (f as any).patientId === patient.patientId);
+
+    const events: PatientTimelineEvent[] = [];
+
+    // Registration event
+    if (patient.createdAt) {
+      events.push({
+        id: `pat-create-${patient.patientId}`,
+        type: 'PATIENT_CREATED',
+        occurredAt: patient.createdAt,
+        title: 'Patient Profile Created',
+        detail: `Acquisition source: ${patient.acquisitionSource}, Initial status: ${patient.status}${referringDoctor ? ` (Referred by Dr. ${referringDoctor.name})` : ''}`,
+        metadata: { source: patient.acquisitionSource, status: patient.status }
+      });
+    }
+
+    // Update event if different from creation
+    if (patient.updatedAt && patient.updatedAt !== patient.createdAt) {
+      events.push({
+        id: `pat-update-${patient.patientId}-${new Date(patient.updatedAt).getTime()}`,
+        type: 'PATIENT_UPDATED',
+        occurredAt: patient.updatedAt,
+        title: 'Patient Profile Updated',
+        detail: `Status: ${patient.status}`,
+        metadata: { status: patient.status }
+      });
+    }
+
+    // Referrals
+    patientReferrals.forEach(r => {
+      const doc = doctors.find(d => d.id === r.doctorId || d.doctorId === r.doctorId);
+      events.push({
+        id: `ref-${r.referralId || (r as any).id}`,
+        type: 'REFERRAL',
+        occurredAt: r.referralDate ? (r.referralDate.includes('T') ? r.referralDate : `${r.referralDate}T00:00:00.000Z`) : r.createdAt,
+        title: `Doctor Referral: ${doc ? doc.name : r.doctorId}`,
+        detail: `Referral status: ${r.status}${r.notes ? ' - ' + r.notes : ''}`,
+        metadata: { doctorId: r.doctorId, status: r.status }
+      });
+    });
+
+    // Orders
+    patientOrders.forEach(o => {
+      events.push({
+        id: `ord-${o.orderId}`,
+        type: 'ORDER',
+        occurredAt: o.orderDate ? (o.orderDate.includes('T') ? o.orderDate : `${o.orderDate}T00:00:00.000Z`) : o.createdAt,
+        title: `Order: ${o.product} (${o.quantity} unit${o.quantity === 1 ? '' : 's'})`,
+        detail: `Total: PKR ${o.total.toLocaleString()} - Order status: ${o.orderStatus}, Payment: ${o.paymentStatus}`,
+        metadata: { orderId: o.orderId, total: o.total, orderStatus: o.orderStatus, paymentStatus: o.paymentStatus }
+      });
+    });
+
+    // Sensor Lifecycles
+    patientSensors.forEach(s => {
+      events.push({
+        id: `sen-${s.sensorId}`,
+        type: 'SENSOR',
+        occurredAt: s.startDate ? (s.startDate.includes('T') ? s.startDate : `${s.startDate}T00:00:00.000Z`) : s.createdAt,
+        title: `Sensor Activation: ${s.product}`,
+        detail: `Status: ${s.status}, End date: ${s.expectedEndDate}, Renewal due: ${s.renewalDate}`,
+        metadata: { sensorId: s.sensorId, status: s.status, renewalDate: s.renewalDate }
+      });
+    });
+
+    // Followups
+    patientFollowups.forEach(f => {
+      events.push({
+        id: `fol-${f.id || f.followUpId}`,
+        type: 'FOLLOWUP',
+        occurredAt: f.dueDate ? (f.dueDate.includes('T') ? f.dueDate : `${f.dueDate}T00:00:00.000Z`) : ((f as any).createdAt || new Date(0).toISOString()),
+        title: `Follow-up: ${f.title}`,
+        detail: `Priority: ${f.priority}, Status: ${f.status || (f.isCompleted ? 'completed' : 'pending')}${f.completedNotes ? ' - ' + f.completedNotes : ''}`,
+        metadata: { priority: f.priority, isCompleted: f.isCompleted }
+      });
+    });
+
+    events.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+    res.json({ success: true, data: events });
   });
 
   // 4c. Lead Management Foundation (v1.6.1)

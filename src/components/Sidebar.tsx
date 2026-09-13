@@ -13,6 +13,7 @@ import {
 export type NavTab = 
   | 'briefing' 
   | 'doctors' 
+  | 'patients'
   | 'planner' 
   | 'ai_coach' 
   | 'tasks' 
@@ -34,6 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems: { id: NavTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }[] = [
     { id: 'briefing', label: 'Field Dashboard', icon: LayoutDashboard },
     { id: 'doctors', label: 'Doctor CRM 360', icon: Users },
+    { id: 'patients', label: 'Patient CRM 360', icon: ShieldCheck },
     { id: 'planner', label: 'Weekly Planner', icon: CalendarDays },
     { id: 'ai_coach', label: 'AI Visit Coach', icon: Sparkles },
     { id: 'tasks', label: 'Follow-ups & Tasks', icon: CheckSquare },

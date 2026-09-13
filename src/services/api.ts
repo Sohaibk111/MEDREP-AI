@@ -14,7 +14,8 @@ import {
   ObjectionDrillResponse,
   ObjectionScenarioDefinition,
   RoutePlanResponse,
-  PrescriberLifecycleStatus, DailyRoutePlan, DoctorPriorityAssessment, PreVisitIntelligence
+  PrescriberLifecycleStatus, DailyRoutePlan, DoctorPriorityAssessment, PreVisitIntelligence,
+  PatientCRM, DoctorPatientReferral, OrderCRM, SensorLifecycle, PatientTimelineEvent
 } from '../types';
 
 const API_BASE = '/api/v1';
@@ -335,5 +336,101 @@ export async function overrideDoctorLifecycle(doctorId: string, status: Prescrib
     body: JSON.stringify({ status, reason })
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to override doctor lifecycle');
+  return res.json();
+}
+
+export async function fetchPatients(params?: { search?: string; status?: string; doctorId?: string; city?: string; acquisitionSource?: string }) {
+  const query = new URLSearchParams();
+  if (params?.search) query.append('search', params.search);
+  if (params?.status) query.append('status', params.status);
+  if (params?.doctorId) query.append('doctorId', params.doctorId);
+  if (params?.city) query.append('city', params.city);
+  if (params?.acquisitionSource) query.append('acquisitionSource', params.acquisitionSource);
+
+  const res = await fetch(`${API_BASE}/patients?${query.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch patients');
+  return res.json();
+}
+
+export async function fetchPatientById(id: string) {
+  const res = await fetch(`${API_BASE}/patients/${id}`);
+  if (!res.ok) throw new Error('Failed to fetch patient details');
+  return res.json();
+}
+
+export async function createPatient(patientData: Partial<PatientCRM>) {
+  const res = await fetch(`${API_BASE}/patients`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patientData)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to create patient');
+  }
+  return res.json();
+}
+
+export async function updatePatient(id: string, patientData: Partial<PatientCRM>) {
+  const res = await fetch(`${API_BASE}/patients/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patientData)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to update patient');
+  }
+  return res.json();
+}
+
+export async function fetchPatientTimeline(patientId: string) {
+  const res = await fetch(`${API_BASE}/patients/${patientId}/timeline`);
+  if (!res.ok) throw new Error('Failed to fetch patient timeline');
+  return res.json();
+}
+
+export async function fetchReferrals(params?: { doctorId?: string; patientId?: string; status?: string }) {
+  const query = new URLSearchParams();
+  if (params?.doctorId) query.append('doctorId', params.doctorId);
+  if (params?.patientId) query.append('patientId', params.patientId);
+  if (params?.status) query.append('status', params.status);
+
+  const res = await fetch(`${API_BASE}/referrals?${query.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch referrals');
+  return res.json();
+}
+
+export async function createReferral(payload: Partial<DoctorPatientReferral>) {
+  const res = await fetch(`${API_BASE}/referrals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to create referral');
+  }
+  return res.json();
+}
+
+export async function fetchOrders(params?: { patientId?: string; orderStatus?: string; paymentStatus?: string }) {
+  const query = new URLSearchParams();
+  if (params?.patientId) query.append('patientId', params.patientId);
+  if (params?.orderStatus) query.append('orderStatus', params.orderStatus);
+  if (params?.paymentStatus) query.append('paymentStatus', params.paymentStatus);
+
+  const res = await fetch(`${API_BASE}/orders?${query.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch orders');
+  return res.json();
+}
+
+export async function fetchSensors(params?: { patientId?: string; status?: string }) {
+  const query = new URLSearchParams();
+  if (params?.patientId) query.append('patientId', params.patientId);
+  if (params?.status) query.append('status', params.status);
+
+  const res = await fetch(`${API_BASE}/sensors?${query.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch sensors');
   return res.json();
 }

@@ -72,6 +72,8 @@ export interface Doctor {
   recentObjections?: string[];
   notes?: string;
   isVerified: boolean;
+  isActive?: boolean;
+  companyCode?: string;
   hasConflict?: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -1061,11 +1063,46 @@ export interface LifecycleHistoryRecord {
 
 export interface DoctorTimelineEvent {
   id: string;
-  type: 'VISIT' | 'OUTCOME' | 'SAMPLE' | 'LIFECYCLE' | 'OPPORTUNITY';
+  type: 'VISIT' | 'OUTCOME' | 'SAMPLE' | 'LIFECYCLE' | 'OPPORTUNITY' | 'REFERRAL' | 'ORDER' | 'SENSOR' | 'FOLLOWUP';
   occurredAt: string;
   title: string;
   detail?: string;
   visitId?: string;
+  patientId?: string;
+  orderId?: string;
+  sensorId?: string;
+  followupId?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface PatientTimelineEvent {
+  id: string;
+  type: 'PATIENT_CREATED' | 'PATIENT_UPDATED' | 'REFERRAL' | 'ORDER' | 'SENSOR' | 'FOLLOWUP' | 'STATUS_CHANGE';
+  occurredAt: string;
+  title: string;
+  detail?: string;
+  metadata?: Record<string, any>;
+}
+
+export type DataProvenanceTag =
+  | 'FIELD_VERIFIED'
+  | 'COMPANY_PROVIDED'
+  | 'WEB_VERIFIED'
+  | 'REP_ENTERED'
+  | 'AI_INFERRED'
+  | 'UNKNOWN';
+
+export interface ReferredPatientSummary {
+  patientId: string;
+  name: string;
+  phone: string;
+  status: PatientCRMStatus;
+  acquisitionSource: PatientAcquisitionSource;
+  city: string;
+  referralStatus?: ReferralStatus;
+  ordersCount: number;
+  activeSensorStatus?: SensorLifecycleStatus;
+  sensorRenewalDate?: string;
 }
 
 // ==========================================
