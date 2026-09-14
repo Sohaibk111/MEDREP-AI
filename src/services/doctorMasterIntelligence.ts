@@ -64,7 +64,7 @@ function sourceRank(source: SourceType): number {
 
 export function getDoctorMasterVerification(doctor: Doctor): DoctorMasterVerification {
   const sources = doctor.timings.map(t => t.source);
-  if (sources.length === 0) return doctor.isVerified ? 'WEB_VERIFIED' : 'UNKNOWN';
+  if (sources.length === 0) return 'UNKNOWN';
   const ranks = sources.map(sourceRank);
   const max = Math.max(...ranks);
   const min = Math.min(...ranks);
