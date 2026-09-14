@@ -5,9 +5,28 @@ const isWindows = process.platform === 'win32';
 
 function run(command: string, args: string[], label: string): void {
   console.log(`\n===== ${label} =====`);
+
+  if (isWindows) {
+    const commandLine = [command, ...args]
+      .map(arg => `"${arg.replace(/"/g, '\\"')}"`)
+      .join(' ');
+    const result = spawnSync('cmd.exe', ['/d', '/s', '/c', commandLine], {
+      stdio: 'inherit',
+      shell: false,
+      env: process.env,
+      windowsVerbatimArguments: false,
+    });
+
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`${label} failed with exit code ${result.status ?? 'unknown'}`);
+    }
+    return;
+  }
+
   const result = spawnSync(command, args, {
     stdio: 'inherit',
-    shell: isWindows,
+    shell: false,
     env: process.env,
   });
 
@@ -66,11 +85,6 @@ function stopServer(server: ChildProcess): void {
   server.kill('SIGTERM');
 }
 
-function resolveCommand(command: string): string {
-  if (!isWindows) return command;
-  return `${command}.cmd`;
-}
-
 async function main(): Promise<void> {
   let server: ChildProcess | undefined;
 
@@ -85,14 +99,14 @@ async function main(): Promise<void> {
     await waitForServer();
     console.log('✓ Local server health check passed.');
 
-    run(resolveCommand('npx'), ['tsx', 'tests/test_v1_6_3_doctor_master_route.ts'], 'v1.6.3 Doctor Master + Route');
-    run(resolveCommand('npx'), ['tsx', 'tests/test_v1_6_2_360_experience.ts'], 'v1.6.2 Doctor 360 + Patient 360');
-    run(resolveCommand('npx'), ['tsx', 'tests/test_v1_6_1_foundation.ts'], 'v1.6.1 CRM Foundation');
-    run(resolveCommand('npx'), ['tsx', 'tests/test_v1_5_2_competitor_retrieval.ts'], 'v1.5.2 Competitor Retrieval');
-    run(resolveCommand('npx'), ['tsx', 'tests/test_v1_5_3_competitor_claim_guard.ts'], 'v1.5.3 Competitor Claim Guard');
-    run(resolveCommand('npx'), ['tsx', 'tests/test_v1_5_4_competitor_deterministic.ts'], 'v1.5.4 Deterministic Competitor Responses');
-    run(resolveCommand('npx'), ['tsx', 'tests/regression-test.ts'], 'Comprehensive Product Regression');
-    run(resolveCommand('npx'), ['tsc', '--noEmit'], 'TypeScript Typecheck');
+    run('npx', ['tsx', 'tests/test_v1_6_3_doctor_master_route.ts'], 'v1.6.3 Doctor Master + Route');
+    run('npx', ['tsx', 'tests/test_v1_6_2_360_experience.ts'], 'v1.6.2 Doctor 360 + Patient 360');
+    run('npx', ['tsx', 'tests/test_v1_6_1_foundation.ts'], 'v1.6.1 CRM Foundation');
+    run('npx', ['tsx', 'tests/test_v1_5_2_competitor_retrieval.ts'], 'v1.5.2 Competitor Retrieval');
+    run('npx', ['tsx', 'tests/test_v1_5_3_competitor_claim_guard.ts'], 'v1.5.3 Competitor Claim Guard');
+    run('npx', ['tsx', 'tests/test_v1_5_4_competitor_deterministic.ts'], 'v1.5.4 Deterministic Competitor Responses');
+    run('npx', ['tsx', 'tests/regression-test.ts'], 'Comprehensive Product Regression');
+    run('npx', ['tsc', '--noEmit'], 'TypeScript Typecheck');
     run('npm', ['run', 'build'], 'Production Build');
 
     console.log('\n================================================================');
