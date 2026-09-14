@@ -27,7 +27,7 @@ check(listCompanyDoctorAssignments({ city: 'Rawalpindi' }).length === 11, 'Rawal
 check(listCompanyDoctorAssignments({ city: 'Islamabad' }).length === 20, 'Islamabad filter returns 20 assignments');
 check(listCompanyDoctorAssignments({ city: 'Abbottabad' }).length === 11, 'Abbottabad filter returns 11 assignments');
 check(listCompanyDoctorAssignments({ locality: 'Saidpur Road' }).length === 11, 'Saidpur Road filter returns 11 assignments');
-check(listCompanyDoctorAssignments({ specialty: 'Endocrinologist' }).length === 6, 'Endocrinologist filter returns 6 assignments');
+check(listCompanyDoctorAssignments({ specialty: 'Endocrinologist' }).length === 7, 'Endocrinologist filter returns 7 assignments');
 check(getCompanyDoctorAssignment('56004')?.name === 'Dr Kashif Jan', 'company ID lookup preserves Dr Kashif Jan');
 check(getCompanyDoctorAssignment('999999') === undefined, 'unknown company ID remains unresolved');
 check(reconcileCompanyAssignmentToCRM(
