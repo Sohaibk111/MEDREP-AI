@@ -21,6 +21,7 @@ export interface OptimizedFieldRoute {
   stops: OptimizedRouteStop[];
   lockedVisitCount: number;
   recommendedCount: number;
+  recommendationsCapacity: number;
   limitations: string[];
 }
 
@@ -90,9 +91,11 @@ export function optimizeFieldRoute(
     stops: [...lockedStops, ...recommended],
     lockedVisitCount: lockedStops.length,
     recommendedCount: recommended.length,
+    recommendationsCapacity: capacity,
     limitations: [
       'No coordinate/travel-time matrix is used in this deterministic v1.6.3 optimizer.',
       'Scheduled CRM visits are locked and never displaced by recommendations.',
+      'maxStops limits recommended stops; scheduled CRM visits remain locked even when they exceed maxStops.',
       'Facility, area, priority, CGM potential, relationship status and verified calling windows drive ranking.'
     ]
   };
