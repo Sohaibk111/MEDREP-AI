@@ -1,8 +1,10 @@
 import { spawn, spawnSync, ChildProcess } from 'child_process';
+import path from 'path';
 
 const BASE_URL = 'http://127.0.0.1:3000';
 const isWindows = process.platform === 'win32';
-const npmCommand = isWindows ? 'npx.cmd' : 'npx';
+const tsxBin = path.resolve(process.cwd(), 'node_modules', '.bin', isWindows ? 'tsx.cmd' : 'tsx');
+const tscBin = path.resolve(process.cwd(), 'node_modules', '.bin', isWindows ? 'tsc.cmd' : 'tsc');
 
 function run(command: string, args: string[], label: string): void {
   console.log(`\n===== ${label} =====`);
@@ -10,6 +12,7 @@ function run(command: string, args: string[], label: string): void {
     stdio: 'inherit',
     shell: false,
     env: process.env,
+    windowsVerbatimArguments: false,
   });
 
   if (result.error) throw result.error;
@@ -18,7 +21,7 @@ function run(command: string, args: string[], label: string): void {
   }
 }
 
-async function waitForServer(timeoutMs = 20000): Promise<void> {
+async function waitForServer(timeoutMs = 30000): Promise<void> {
   const started = Date.now();
   let lastError = 'server not ready';
 
@@ -81,15 +84,15 @@ async function main(): Promise<void> {
     await waitForServer();
     console.log('✓ Local server health check passed.');
 
-    run(npmCommand, ['tsx', 'tests/test_v1_6_3_doctor_master_route.ts'], 'v1.6.3 Doctor Master + Route');
-    run(npmCommand, ['tsx', 'tests/test_v1_6_2_360_experience.ts'], 'v1.6.2 Doctor 360 + Patient 360');
-    run(npmCommand, ['tsx', 'tests/test_v1_6_1_foundation.ts'], 'v1.6.1 CRM Foundation');
-    run(npmCommand, ['tsx', 'tests/test_v1_5_2_competitor_retrieval.ts'], 'v1.5.2 Competitor Retrieval');
-    run(npmCommand, ['tsx', 'tests/test_v1_5_3_competitor_claim_guard.ts'], 'v1.5.3 Competitor Claim Guard');
-    run(npmCommand, ['tsx', 'tests/test_v1_5_4_competitor_deterministic.ts'], 'v1.5.4 Deterministic Competitor Responses');
-    run(npmCommand, ['tsx', 'tests/regression-test.ts'], 'Comprehensive Product Regression');
-    run(npmCommand, ['tsc', '--noEmit'], 'TypeScript Typecheck');
-    run('npm', ['run', 'build'], 'Production Build');
+    run(tsxBin, ['tests/test_v1_6_3_doctor_master_route.ts'], 'v1.6.3 Doctor Master + Route');
+    run(tsxBin, ['tests/test_v1_6_2_360_experience.ts'], 'v1.6.2 Doctor 360 + Patient 360');
+    run(tsxBin, ['tests/test_v1_6_1_foundation.ts'], 'v1.6.1 CRM Foundation');
+    run(tsxBin, ['tests/test_v1_5_2_competitor_retrieval.ts'], 'v1.5.2 Competitor Retrieval');
+    run(tsxBin, ['tests/test_v1_5_3_competitor_claim_guard.ts'], 'v1.5.3 Competitor Claim Guard');
+    run(tsxBin, ['tests/test_v1_5_4_competitor_deterministic.ts'], 'v1.5.4 Deterministic Competitor Responses');
+    run(tsxBin, ['tests/regression-test.ts'], 'Comprehensive Product Regression');
+    run(tscBin, ['--noEmit'], 'TypeScript Typecheck');
+    run(process.env.npm_execpath || 'npm', ['run', 'build'], 'Production Build');
 
     console.log('\n================================================================');
     console.log(' RELEASE VALIDATION PASSED');
