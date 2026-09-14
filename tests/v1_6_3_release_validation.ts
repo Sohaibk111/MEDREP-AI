@@ -6,28 +6,16 @@ const isWindows = process.platform === 'win32';
 function run(command: string, args: string[], label: string): void {
   console.log(`\n===== ${label} =====`);
 
-  if (isWindows) {
-    const commandLine = [command, ...args]
-      .map(arg => `"${arg.replace(/"/g, '\\"')}"`)
-      .join(' ');
-    const result = spawnSync('cmd.exe', ['/d', '/s', '/c', commandLine], {
-      stdio: 'inherit',
-      shell: false,
-      env: process.env,
-      windowsVerbatimArguments: false,
-    });
+  const executable = isWindows ? 'cmd.exe' : command;
+  const executableArgs = isWindows
+    ? ['/d', '/s', '/c', [command, ...args].map(arg => `"${arg.replace(/"/g, '\\"')}"`).join(' ')]
+    : args;
 
-    if (result.error) throw result.error;
-    if (result.status !== 0) {
-      throw new Error(`${label} failed with exit code ${result.status ?? 'unknown'}`);
-    }
-    return;
-  }
-
-  const result = spawnSync(command, args, {
+  const result = spawnSync(executable, executableArgs, {
     stdio: 'inherit',
     shell: false,
     env: process.env,
+    windowsVerbatimArguments: false,
   });
 
   if (result.error) throw result.error;
