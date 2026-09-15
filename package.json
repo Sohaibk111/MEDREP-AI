@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "validate:v1.6.3": "tsx tests/v1_6_3_release_validation.ts"
+    "validate:v1.6.3": "tsx tests/v1_6_3_release_validation.ts",
+    "validate:v1.6.4": "tsx tests/test_v1_6_4_company_assignment.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
