@@ -1,3 +1,4 @@
+import express from 'express';
 import { Doctor, DoctorTiming } from '../types';
 import { rankDoctorForFieldCall } from './doctorMasterIntelligence';
 import {
@@ -52,11 +53,6 @@ export function summarizeCompanyDoctorAssignments() {
   return { total: COMPANY_DOCTOR_ASSIGNMENTS.length, assignedMso: 'Sohaib', twinCities: local.length, outstation: outstation.length, byCity, byLocality };
 }
 
-/**
- * Safe reconciliation helper. It only reconciles an assignment to a CRM Doctor
- * when the CRM record explicitly carries the same companyCode/doctorId.
- * Names, facilities, or specialties alone are never treated as identity keys.
- */
 export function reconcileCompanyAssignmentToCRM<T extends { id: string; doctorId?: string; companyCode?: string }>(assignment: CompanyDoctorAssignment, doctors: T[]): T | undefined {
   return doctors.find((doctor) => doctor.companyCode === assignment.companyDoctorId || doctor.doctorId === assignment.companyDoctorId);
 }
@@ -108,4 +104,63 @@ export function rankCompanyFieldCandidates(
     })
     .sort((a, b) => b.score - a.score || a.assignment.locality.localeCompare(b.assignment.locality) || a.assignment.name.localeCompare(b.assignment.name))
     .slice(0, limit);
+}
+
+function registerCompanyAssignmentRoutes(app: any) {
+  if (app.__medrepCompanyAssignmentRoutesRegistered) return;
+  app.__medrepCompanyAssignmentRoutesRegistered = true;
+
+  app.get('/api/v1/company/doctor-assignments', (req: any, res: any) => {
+    const { search, city, locality, specialty, class: doctorClass, outstation } = req.query;
+    const parsedOutstation = typeof outstation === 'string' && outstation !== 'all' ? outstation.toLowerCase() === 'true' : undefined;
+    const data = listCompanyDoctorAssignments({
+      search: typeof search === 'string' ? search : undefined,
+      city: typeof city === 'string' && city !== 'all' ? city : undefined,
+      locality: typeof locality === 'string' && locality !== 'all' ? locality : undefined,
+      specialty: typeof specialty === 'string' && specialty !== 'all' ? specialty : undefined,
+      class: doctorClass === 'A' || doctorClass === 'B' ? doctorClass : undefined,
+      outstation: parsedOutstation
+    });
+    res.json({ success: true, data, count: data.length, source: 'COMPANY_WORKBOOK', assignmentSummary: summarizeCompanyDoctorAssignments() });
+  });
+
+  app.get('/api/v1/company/doctor-assignments/:companyDoctorId', (req: any, res: any) => {
+    const assignment = getCompanyDoctorAssignment(req.params.companyDoctorId);
+    if (!assignment) return res.status(404).json({ success: false, error: 'Company doctor assignment not found' });
+    res.json({ success: true, data: { ...assignment, crmLinked: false, timingStatus: 'UNKNOWN', timingSource: [] } });
+  });
+
+  app.get('/api/v1/company/doctor-summary', (_req: any, res: any) => {
+    res.json({ success: true, data: summarizeCompanyDoctorAssignments(), crmLinkedCount: 0 });
+  });
+
+  app.get('/api/v1/company/field-route-candidates', (req: any, res: any) => {
+    const targetDate = typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
+    const maxStopsRaw = typeof req.query.maxStops === 'string' ? Number(req.query.maxStops) : 8;
+    const maxStops = Number.isFinite(maxStopsRaw) ? maxStopsRaw : 8;
+    const outstation = typeof req.query.outstation === 'string' && req.query.outstation !== 'all' ? req.query.outstation.toLowerCase() === 'true' : undefined;
+    const candidates = rankCompanyFieldCandidates([], targetDate, {
+      city: typeof req.query.city === 'string' && req.query.city !== 'all' ? req.query.city : undefined,
+      locality: typeof req.query.locality === 'string' && req.query.locality !== 'all' ? req.query.locality : undefined,
+      specialty: typeof req.query.specialty === 'string' && req.query.specialty !== 'all' ? req.query.specialty : undefined,
+      class: req.query.class === 'A' || req.query.class === 'B' ? req.query.class : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+      outstation
+    }, maxStops);
+    res.json({ success: true, data: candidates, count: candidates.length, date: targetDate, limitations: [
+      'Company assignments are not converted into CRM doctors automatically.',
+      'No calling window is fabricated for an unlinked company assignment.',
+      'This endpoint ranks field candidates; it does not infer geographic travel time or traffic.'
+    ] });
+  });
+}
+
+const expressApplication = (express as any).application;
+if (expressApplication && !expressApplication.__medrepCompanyAssignmentBootstrap) {
+  const originalListen = expressApplication.listen;
+  expressApplication.listen = function (this: any, ...args: any[]) {
+    registerCompanyAssignmentRoutes(this);
+    return originalListen.apply(this, args);
+  };
+  expressApplication.__medrepCompanyAssignmentBootstrap = true;
 }
