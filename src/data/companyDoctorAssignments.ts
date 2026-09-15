@@ -4,14 +4,14 @@ export type CompanyDoctorAssignment = {
   qualification: string;
   class: 'A' | 'B';
   specialty: string;
-  city: 'Rawalpindi' | 'Islamabad' | 'Abbottabad' | 'Mansehra' | 'Muzaffarabad';
+  city: string;
   locality: string;
   locationName: string;
   assignedMso: string;
   assignmentSource: 'COMPANY_WORKBOOK';
 };
 
-const COMPANY_ASSIGNMENT_ROWS: Array<[string,string,string,'A'|'B',string,'Rawalpindi'|'Islamabad'|'Abbottabad'|'Mansehra'|'Muzaffarabad',string,string]> = [
+const COMPANY_ASSIGNMENT_ROWS: Array<[string,string,string,'A'|'B',string,string,string,string]> = [
 ['29810','Dr Imran Iftikha','FCPS','A','Cardiologist','Rawalpindi','Saidpur Road','RIC'],
 ['54093','Dr Muhammad Mohsin','FCPS','A','Cardiologist','Rawalpindi','Saidpur Road','RIC'],
 ['18385','Dr Saima Usman','FCPS','A','Medicine','Rawalpindi','Saidpur Road','Holy family hospital'],
@@ -71,6 +71,6 @@ export const COMPANY_DOCTOR_ASSIGNMENTS: readonly CompanyDoctorAssignment[] = CO
   assignedMso: 'Sohaib', assignmentSource: 'COMPANY_WORKBOOK'
 }));
 
-export const TWIN_CITIES = ['Rawalpindi', 'Islamabad'] as const;
+export const TWIN_CITIES = ['Rawalpindi', 'Islamabad'];
 export const isTwinCityAssignment = (assignment: CompanyDoctorAssignment) => TWIN_CITIES.includes(assignment.city);
 export const isOutstationAssignment = (assignment: CompanyDoctorAssignment) => !isTwinCityAssignment(assignment);

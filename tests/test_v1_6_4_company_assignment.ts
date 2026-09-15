@@ -8,7 +8,8 @@ import {
   getCompanyDoctorAssignment,
   listCompanyDoctorAssignments,
   reconcileCompanyAssignmentToCRM,
-  summarizeCompanyDoctorAssignments
+  summarizeCompanyDoctorAssignments,
+  rankCompanyFieldCandidates
 } from '../src/services/companyDoctorAssignmentService';
 
 const checks: string[] = [];
@@ -23,8 +24,8 @@ check(COMPANY_DOCTOR_ASSIGNMENTS.every(d => d.assignedMso === 'Sohaib'), 'all as
 check(COMPANY_DOCTOR_ASSIGNMENTS.every(d => d.assignmentSource === 'COMPANY_WORKBOOK'), 'all rows retain company-workbook provenance');
 check(COMPANY_DOCTOR_ASSIGNMENTS.filter(isTwinCityAssignment).length === 31, '31 assignments are in the Rawalpindi/Islamabad territory');
 check(COMPANY_DOCTOR_ASSIGNMENTS.filter(isOutstationAssignment).length === 21, '21 assignments are outstation');
-check(listCompanyDoctorAssignments({ city: 'Rawalpindi' }).length === 11, 'Rawalpindi filter returns 11 assignments');
-check(listCompanyDoctorAssignments({ city: 'Islamabad' }).length === 20, 'Islamabad filter returns 20 assignments');
+check(listCompanyDoctorAssignments({ city: 'Rawalpindi' }).length === 12, 'Rawalpindi filter returns 12 assignments');
+check(listCompanyDoctorAssignments({ city: 'Islamabad' }).length === 19, 'Islamabad filter returns 19 assignments');
 check(listCompanyDoctorAssignments({ city: 'Abbottabad' }).length === 11, 'Abbottabad filter returns 11 assignments');
 check(listCompanyDoctorAssignments({ locality: 'Saidpur Road' }).length === 11, 'Saidpur Road filter returns 11 assignments');
 check(listCompanyDoctorAssignments({ specialty: 'Endocrinologist' }).length === 7, 'Endocrinologist filter returns 7 assignments');
@@ -41,5 +42,10 @@ check(reconcileCompanyAssignmentToCRM(
 
 const summary = summarizeCompanyDoctorAssignments();
 check(summary.total === 52 && summary.twinCities === 31 && summary.outstation === 21, 'assignment summary totals are deterministic');
+check(summary.byCity.Rawalpindi === 12 && summary.byCity.Islamabad === 19, 'city summary preserves Twin Cities split');
+check(summary.byLocality['Saidpur Road'] === 11, 'locality summary preserves Saidpur Road count');
+const routeCandidates = rankCompanyFieldCandidates([], '2026-09-15', { city: 'Rawalpindi' }, 8);
+check(routeCandidates.length === 8, 'company route candidate capacity is deterministic');
+check(routeCandidates.every(candidate => candidate.crmLinked === false), 'unlinked company assignments do not fabricate CRM links');
 
 console.log(`v1.6.4 Company Assignment Registry: ${checks.length}/${checks.length} checks passed`);
